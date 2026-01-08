@@ -73,6 +73,7 @@ function renderNavTabs() {
     navTabs.innerHTML = `
       <button class="nav-tab ${currentTab === 'dashboard' ? 'active' : ''}" onclick="switchTab('dashboard')">대시보드</button>
       <button class="nav-tab ${currentTab === 'staff' ? 'active' : ''}" onclick="switchTab('staff')">직원관리</button>
+      <button class="nav-tab ${currentTab === 'commission' ? 'active' : ''}" onclick="switchTab('commission')">비율제강사</button>
       <button class="nav-tab ${currentTab === 'worklogs' ? 'active' : ''}" onclick="switchTab('worklogs')">근무기록</button>
       <button class="nav-tab ${currentTab === 'payroll' ? 'active' : ''}" onclick="switchTab('payroll')">급여정산</button>
       <button class="nav-tab ${currentTab === 'messages' ? 'active' : ''}" onclick="switchTab('messages')">문자생성</button>
@@ -104,6 +105,9 @@ function renderContent() {
       break;
     case 'staff':
       renderStaffManagement(main);
+      break;
+    case 'commission':
+      renderCommissionInstructors(main);
       break;
     case 'worklogs':
       renderWorkLogs(main);
@@ -386,6 +390,352 @@ function confirmDeleteStaff(staffId) {
   }
 }
 
+// ============ 비율제 강사 관리 ============
+let selectedCommissionInstructor = null;
+
+function renderCommissionInstructors(container) {
+  const { year, month } = parseMonthKey(selectedMonth);
+
+  container.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+      <h2 style="color: var(--primary);">비율제 강사 관리</h2>
+      <div style="display: flex; gap: 1rem; align-items: center;">
+        <div class="month-selector">
+          <input type="month" value="${selectedMonth}" onchange="changeMonth(this.value)">
+        </div>
+        <button class="btn btn-primary" onclick="openAddCommissionInstructorModal()">+ 강사 추가</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">등록된 비율제 강사</h3>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>이름</th>
+              <th>비율</th>
+              <th>${month}월 학생수</th>
+              <th>${month}월 수강료</th>
+              <th>${month}월 예상지급액</th>
+              <th>관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${appData.commissionInstructors.length > 0 ? appData.commissionInstructors.map(instructor => {
+              const students = getCommissionStudents(instructor.id, selectedMonth);
+              const calc = students.length > 0 ? calculateCommission(instructor, students, appData.settings) : null;
+              return `
+                <tr>
+                  <td><strong>${instructor.name}</strong></td>
+                  <td><span class="badge badge-part">${formatPercent(instructor.commissionRate)}</span></td>
+                  <td>${students.length}명</td>
+                  <td>${calc ? formatKRW(calc.totalTuition) : '-'}</td>
+                  <td><strong style="color: var(--success);">${calc ? formatKRW(calc.netPay) : '-'}</strong></td>
+                  <td>
+                    <div class="actions">
+                      <button class="btn btn-accent btn-sm" onclick="openStudentManagement(${instructor.id})">학생관리</button>
+                      <button class="btn btn-outline btn-sm" onclick="openEditCommissionInstructorModal(${instructor.id})">수정</button>
+                      <button class="btn btn-danger btn-sm" onclick="confirmDeleteCommissionInstructor(${instructor.id})">삭제</button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join('') : '<tr><td colspan="6" class="empty-state">등록된 비율제 강사가 없습니다.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="studentManagementSection"></div>
+  `;
+}
+
+function openAddCommissionInstructorModal() {
+  document.getElementById('modalTitle').textContent = '비율제 강사 추가';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">이름 *</label>
+      <input type="text" id="commInstructorName" class="form-input" placeholder="강사 이름">
+    </div>
+    <div class="form-group">
+      <label class="form-label">강사 비율 (%) *</label>
+      <input type="number" id="commInstructorRate" class="form-input" value="50" min="1" max="100" step="1">
+      <small style="color: var(--text-light);">예: 50 = 5:5, 60 = 6:4 (강사:학원)</small>
+    </div>
+    <div style="background: var(--bg); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+      <strong>공제 안내</strong>
+      <p style="font-size: 0.875rem; color: var(--text-light); margin-top: 0.5rem;">
+        비율제 강사는 다음 공제가 적용됩니다:<br>
+        • 카드수수료 1% (전체 수강료에서 먼저 공제)<br>
+        • 사업소득세 3.3% (강사 몫에서 공제)
+      </p>
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveNewCommissionInstructor()">저장</button>
+  `;
+  openModal();
+}
+
+function openEditCommissionInstructorModal(id) {
+  const instructor = getCommissionInstructorById(id);
+  document.getElementById('modalTitle').textContent = '비율제 강사 수정';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">이름 *</label>
+      <input type="text" id="commInstructorName" class="form-input" value="${instructor.name}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">강사 비율 (%) *</label>
+      <input type="number" id="commInstructorRate" class="form-input" value="${instructor.commissionRate * 100}" min="1" max="100" step="1">
+      <small style="color: var(--text-light);">예: 50 = 5:5, 60 = 6:4 (강사:학원)</small>
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveEditCommissionInstructor(${id})">저장</button>
+  `;
+  openModal();
+}
+
+function saveNewCommissionInstructor() {
+  const name = document.getElementById('commInstructorName').value.trim();
+  const ratePercent = parseInt(document.getElementById('commInstructorRate').value);
+
+  if (!name) {
+    alert('이름을 입력해주세요.');
+    return;
+  }
+  if (isNaN(ratePercent) || ratePercent < 1 || ratePercent > 100) {
+    alert('비율은 1~100 사이로 입력해주세요.');
+    return;
+  }
+
+  addCommissionInstructor({
+    name,
+    commissionRate: ratePercent / 100
+  });
+
+  closeModal();
+  renderContent();
+  showToast('비율제 강사가 추가되었습니다.');
+}
+
+function saveEditCommissionInstructor(id) {
+  const name = document.getElementById('commInstructorName').value.trim();
+  const ratePercent = parseInt(document.getElementById('commInstructorRate').value);
+
+  if (!name) {
+    alert('이름을 입력해주세요.');
+    return;
+  }
+
+  updateCommissionInstructor(id, {
+    name,
+    commissionRate: ratePercent / 100
+  });
+
+  closeModal();
+  renderContent();
+  showToast('강사 정보가 수정되었습니다.');
+}
+
+function confirmDeleteCommissionInstructor(id) {
+  if (confirm('정말 삭제하시겠습니까? 관련 학생 데이터도 모두 삭제됩니다.')) {
+    deleteCommissionInstructor(id);
+    renderContent();
+    showToast('강사가 삭제되었습니다.');
+  }
+}
+
+// ============ 학생 관리 (비율제 강사) ============
+function openStudentManagement(instructorId) {
+  selectedCommissionInstructor = instructorId;
+  const instructor = getCommissionInstructorById(instructorId);
+  const students = getCommissionStudents(instructorId, selectedMonth);
+  const { year, month } = parseMonthKey(selectedMonth);
+  const calc = students.length > 0 ? calculateCommission(instructor, students, appData.settings) : null;
+
+  const html = `
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">${instructor.name} - ${month}월 학생 관리</h3>
+        <div style="display: flex; gap: 0.5rem;">
+          <label class="btn btn-success btn-sm" style="cursor: pointer;">
+            Excel 업로드
+            <input type="file" accept=".csv,.txt" style="display: none;" onchange="handleStudentExcelUpload(this, ${instructorId})">
+          </label>
+          <button class="btn btn-primary btn-sm" onclick="openAddStudentModal(${instructorId})">+ 학생 추가</button>
+        </div>
+      </div>
+
+      ${calc ? `
+        <div class="summary-grid" style="margin-bottom: 1rem;">
+          <div class="summary-card">
+            <div class="summary-label" style="color: var(--text-light);">총 수강료</div>
+            <div class="summary-value" style="font-size: 1.25rem;">${formatKRW(calc.totalTuition)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label" style="color: var(--text-light);">카드수수료 (1%)</div>
+            <div class="summary-value" style="font-size: 1.25rem; color: var(--danger);">-${formatKRW(calc.cardFee)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label" style="color: var(--text-light);">강사 몫 (${formatPercent(instructor.commissionRate)})</div>
+            <div class="summary-value" style="font-size: 1.25rem;">${formatKRW(calc.instructorGross)}</div>
+          </div>
+          <div class="summary-card primary">
+            <div class="summary-label">실지급액 (3.3% 공제 후)</div>
+            <div class="summary-value" style="font-size: 1.25rem;">${formatKRW(calc.netPay)}</div>
+          </div>
+        </div>
+      ` : ''}
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>학생명</th>
+              <th>수강료</th>
+              <th>관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${students.length > 0 ? students.map(student => `
+              <tr>
+                <td>${student.name}</td>
+                <td>${formatKRW(student.tuition)}</td>
+                <td>
+                  <div class="actions">
+                    <button class="btn btn-outline btn-sm" onclick="openEditStudentModal(${instructorId}, ${student.id})">수정</button>
+                    <button class="btn btn-danger btn-sm" onclick="confirmDeleteStudent(${instructorId}, ${student.id})">삭제</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('') : '<tr><td colspan="3" class="empty-state">등록된 학생이 없습니다. Excel 업로드 또는 직접 추가해주세요.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="margin-top: 1rem; padding: 1rem; background: var(--bg); border-radius: 8px;">
+        <strong>Excel 업로드 형식</strong>
+        <p style="font-size: 0.8125rem; color: var(--text-light); margin-top: 0.5rem;">
+          CSV 파일 형식: 학생명,수강료 (첫 줄은 헤더로 인식됩니다)<br>
+          예시:<br>
+          학생명,수강료<br>
+          홍길동,300000<br>
+          김철수,250000
+        </p>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('studentManagementSection').innerHTML = html;
+}
+
+function handleStudentExcelUpload(input, instructorId) {
+  if (input.files.length > 0) {
+    readCSVFile(input.files[0])
+      .then(students => {
+        if (students.length === 0) {
+          alert('유효한 학생 데이터가 없습니다. 형식을 확인해주세요.');
+          return;
+        }
+        // 기존 학생 데이터에 ID 부여
+        const studentsWithId = students.map((s, i) => ({ id: i + 1, ...s }));
+        setCommissionStudents(instructorId, selectedMonth, studentsWithId);
+        openStudentManagement(instructorId);
+        showToast(`${students.length}명의 학생이 등록되었습니다.`);
+      })
+      .catch(err => {
+        alert('파일 읽기 오류: ' + err.message);
+      });
+  }
+  input.value = '';
+}
+
+function openAddStudentModal(instructorId) {
+  document.getElementById('modalTitle').textContent = '학생 추가';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">학생명 *</label>
+      <input type="text" id="studentName" class="form-input" placeholder="학생 이름">
+    </div>
+    <div class="form-group">
+      <label class="form-label">수강료 *</label>
+      <input type="number" id="studentTuition" class="form-input" placeholder="예: 300000" min="0" step="10000">
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveNewStudent(${instructorId})">저장</button>
+  `;
+  openModal();
+}
+
+function openEditStudentModal(instructorId, studentId) {
+  const students = getCommissionStudents(instructorId, selectedMonth);
+  const student = students.find(s => s.id === studentId);
+
+  document.getElementById('modalTitle').textContent = '학생 수정';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">학생명 *</label>
+      <input type="text" id="studentName" class="form-input" value="${student.name}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">수강료 *</label>
+      <input type="number" id="studentTuition" class="form-input" value="${student.tuition}" min="0" step="10000">
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveEditStudent(${instructorId}, ${studentId})">저장</button>
+  `;
+  openModal();
+}
+
+function saveNewStudent(instructorId) {
+  const name = document.getElementById('studentName').value.trim();
+  const tuition = parseInt(document.getElementById('studentTuition').value);
+
+  if (!name || isNaN(tuition) || tuition <= 0) {
+    alert('학생명과 수강료를 올바르게 입력해주세요.');
+    return;
+  }
+
+  addCommissionStudent(instructorId, selectedMonth, { name, tuition });
+  closeModal();
+  openStudentManagement(instructorId);
+  showToast('학생이 추가되었습니다.');
+}
+
+function saveEditStudent(instructorId, studentId) {
+  const name = document.getElementById('studentName').value.trim();
+  const tuition = parseInt(document.getElementById('studentTuition').value);
+
+  if (!name || isNaN(tuition) || tuition <= 0) {
+    alert('학생명과 수강료를 올바르게 입력해주세요.');
+    return;
+  }
+
+  updateCommissionStudent(instructorId, selectedMonth, studentId, { name, tuition });
+  closeModal();
+  openStudentManagement(instructorId);
+  showToast('학생 정보가 수정되었습니다.');
+}
+
+function confirmDeleteStudent(instructorId, studentId) {
+  if (confirm('정말 삭제하시겠습니까?')) {
+    deleteCommissionStudent(instructorId, selectedMonth, studentId);
+    openStudentManagement(instructorId);
+    showToast('학생이 삭제되었습니다.');
+  }
+}
+
 // ============ 근무기록 ============
 function renderWorkLogs(container) {
   const { year, month } = parseMonthKey(selectedMonth);
@@ -593,7 +943,8 @@ function renderPayroll(container) {
   let totalDeductions = 0;
   let totalNet = 0;
 
-  const payrollData = appData.staff.map(staff => {
+  // 시급제 직원 정산
+  const hourlyPayrollData = appData.staff.map(staff => {
     const logs = getStaffWorkLogs(staff.id, selectedMonth);
     const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
     const wage = calculateWage(staff, totalHours);
@@ -603,8 +954,22 @@ function renderPayroll(container) {
     totalDeductions += ded.deduction;
     totalNet += ded.netPay;
 
-    return { staff, totalHours, wage, ded };
+    return { staff, totalHours, wage, ded, type: 'hourly' };
   }).filter(item => item.totalHours > 0);
+
+  // 비율제 강사 정산
+  const commissionPayrollData = appData.commissionInstructors.map(instructor => {
+    const students = getCommissionStudents(instructor.id, selectedMonth);
+    if (students.length === 0) return null;
+
+    const calc = calculateCommission(instructor, students, appData.settings);
+
+    totalGross += calc.instructorGross;
+    totalDeductions += calc.totalDeduction;
+    totalNet += calc.netPay;
+
+    return { instructor, calc, type: 'commission' };
+  }).filter(item => item !== null);
 
   container.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
@@ -632,15 +997,17 @@ function renderPayroll(container) {
       </div>
     </div>
 
+    ${hourlyPayrollData.length > 0 ? `
     <div class="card">
       <div class="card-header">
-        <h3 class="card-title">직원별 상세 정산</h3>
+        <h3 class="card-title">시급제 직원 정산</h3>
       </div>
       <div class="table-container">
         <table>
           <thead>
             <tr>
               <th>이름</th>
+              <th>유형</th>
               <th>근무시간</th>
               <th>산출 내역</th>
               <th>세전</th>
@@ -650,11 +1017,13 @@ function renderPayroll(container) {
             </tr>
           </thead>
           <tbody>
-            ${payrollData.map(item => {
+            ${hourlyPayrollData.map(item => {
               const { staff, totalHours, wage, ded } = item;
+              const typeName = staff.type === 'assistant' ? '조교' : '파트강사';
               return `
                 <tr>
                   <td><strong>${staff.name}</strong></td>
+                  <td><span class="badge ${staff.type === 'assistant' ? 'badge-assistant' : 'badge-instructor'}">${typeName}</span></td>
                   <td>${formatHours(totalHours)}</td>
                   <td style="font-size: 0.8125rem;">${wage.breakdown}</td>
                   <td>${formatKRW(wage.grossPay)}</td>
@@ -668,12 +1037,169 @@ function renderPayroll(container) {
                   </td>
                 </tr>
               `;
-            }).join('') || '<tr><td colspan="7" class="empty-state">이 달의 급여 정산 데이터가 없습니다.</td></tr>'}
+            }).join('')}
           </tbody>
         </table>
       </div>
     </div>
+    ` : ''}
+
+    ${commissionPayrollData.length > 0 ? `
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">비율제 강사 정산</h3>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>이름</th>
+              <th>비율</th>
+              <th>학생수</th>
+              <th>총 수강료</th>
+              <th>강사 몫</th>
+              <th>공제</th>
+              <th>실지급</th>
+              <th>명세서</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${commissionPayrollData.map(item => {
+              const { instructor, calc } = item;
+              return `
+                <tr>
+                  <td><strong>${instructor.name}</strong></td>
+                  <td><span class="badge badge-part">${formatPercent(instructor.commissionRate)}</span></td>
+                  <td>${calc.studentCount}명</td>
+                  <td>${formatKRW(calc.totalTuition)}</td>
+                  <td>${formatKRW(calc.instructorGross)}</td>
+                  <td style="color: var(--danger); font-size: 0.8125rem;">
+                    -${formatKRW(calc.totalDeduction)}<br>
+                    <span style="color: var(--text-light);">(카드1%+3.3%)</span>
+                  </td>
+                  <td><strong style="color: var(--success);">${formatKRW(calc.netPay)}</strong></td>
+                  <td>
+                    <button class="btn btn-outline btn-sm" onclick="showCommissionPayslip(${instructor.id})">명세서</button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
+
+    ${hourlyPayrollData.length === 0 && commissionPayrollData.length === 0 ? `
+    <div class="card">
+      <div class="empty-state">이 달의 급여 정산 데이터가 없습니다.</div>
+    </div>
+    ` : ''}
   `;
+}
+
+// 비율제 강사 급여명세서
+function showCommissionPayslip(instructorId) {
+  const instructor = getCommissionInstructorById(instructorId);
+  const { year, month } = parseMonthKey(selectedMonth);
+  const students = getCommissionStudents(instructorId, selectedMonth);
+  const calc = calculateCommission(instructor, students, appData.settings);
+
+  const payslipHTML = `
+    <div class="payslip" id="payslipContent">
+      <div class="payslip-header">
+        <div class="payslip-title">급 여 명 세 서</div>
+        <div class="payslip-period">${year}년 ${month}월</div>
+      </div>
+
+      <div class="payslip-info">
+        <div>
+          <div class="payslip-section">
+            <div class="payslip-section-title">사업장 정보</div>
+            <div class="payslip-row">
+              <span>상호</span>
+              <span>강한영어수학학원</span>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="payslip-section">
+            <div class="payslip-section-title">강사 정보</div>
+            <div class="payslip-row">
+              <span>성명</span>
+              <span>${instructor.name}</span>
+            </div>
+            <div class="payslip-row">
+              <span>정산비율</span>
+              <span>${formatPercent(instructor.commissionRate)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="payslip-section">
+        <div class="payslip-section-title">수강료 내역</div>
+        <div class="payslip-row">
+          <span>담당 학생수</span>
+          <span>${calc.studentCount}명</span>
+        </div>
+        <div class="payslip-row">
+          <span>총 수강료</span>
+          <span>${formatKRW(calc.totalTuition)}</span>
+        </div>
+        <div class="payslip-row">
+          <span>카드수수료 (1%)</span>
+          <span style="color: var(--danger);">-${formatKRW(calc.cardFee)}</span>
+        </div>
+        <div class="payslip-row">
+          <span>수수료 공제 후</span>
+          <span>${formatKRW(calc.afterCardFee)}</span>
+        </div>
+      </div>
+
+      <div class="payslip-section">
+        <div class="payslip-section-title">급여 내역</div>
+        <div class="payslip-row">
+          <span>강사 몫 (${formatPercent(instructor.commissionRate)})</span>
+          <span>${formatKRW(calc.instructorGross)}</span>
+        </div>
+        <div class="payslip-row">
+          <span>사업소득세 (3.3%)</span>
+          <span style="color: var(--danger);">-${formatKRW(calc.incomeTax)}</span>
+        </div>
+      </div>
+
+      <div class="payslip-total">
+        <div class="payslip-total-row">
+          <span>실 지급액</span>
+          <span>${formatKRW(calc.netPay)}</span>
+        </div>
+      </div>
+
+      <div class="payslip-signature">
+        <div class="payslip-signature-box">
+          <div class="payslip-signature-line"></div>
+          <div>사업주</div>
+        </div>
+        <div class="payslip-signature-box">
+          <div class="payslip-signature-line"></div>
+          <div>강사</div>
+        </div>
+      </div>
+
+      <div class="payslip-footer">
+        강한영어수학학원 급여관리시스템
+      </div>
+    </div>
+  `;
+
+  document.getElementById('modalTitle').textContent = `${instructor.name} 급여명세서`;
+  document.getElementById('modalBody').innerHTML = payslipHTML;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">닫기</button>
+    <button class="btn btn-primary" onclick="printPayslip()">인쇄하기</button>
+  `;
+  openModal();
 }
 
 // ============ 급여명세서 (인쇄용) ============
@@ -833,6 +1359,12 @@ function renderMessages(container) {
     return logs.reduce((sum, log) => sum + log.hours, 0) > 0;
   });
 
+  // 비율제 강사 중 학생이 있는 강사
+  const commissionWithStudents = appData.commissionInstructors.filter(instructor => {
+    const students = getCommissionStudents(instructor.id, selectedMonth);
+    return students.length > 0;
+  });
+
   container.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
       <h2 style="color: var(--primary);">${year}년 ${month}월 급여 확인 문자 생성</h2>
@@ -843,7 +1375,7 @@ function renderMessages(container) {
 
     <div class="card">
       <div class="card-header">
-        <h3 class="card-title">직원별 문자 생성</h3>
+        <h3 class="card-title">시급제 직원 문자</h3>
         <button class="btn btn-accent" onclick="generateAllMessages()">전체 문자 생성</button>
       </div>
       <div class="table-container">
@@ -876,8 +1408,61 @@ function renderMessages(container) {
       </div>
     </div>
 
+    ${commissionWithStudents.length > 0 ? `
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">비율제 강사 문자</h3>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>이름</th>
+              <th>비율</th>
+              <th>실지급액</th>
+              <th>문자생성</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${commissionWithStudents.map(instructor => {
+              const students = getCommissionStudents(instructor.id, selectedMonth);
+              const calc = calculateCommission(instructor, students, appData.settings);
+              return `
+                <tr>
+                  <td><strong>${instructor.name}</strong></td>
+                  <td>${formatPercent(instructor.commissionRate)}</td>
+                  <td><strong>${formatKRW(calc.netPay)}</strong></td>
+                  <td>
+                    <button class="btn btn-primary btn-sm" onclick="showCommissionMessageModal(${instructor.id})">문자 보기</button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
+
     <div id="allMessagesContainer"></div>
   `;
+}
+
+function showCommissionMessageModal(instructorId) {
+  const instructor = getCommissionInstructorById(instructorId);
+  const students = getCommissionStudents(instructorId, selectedMonth);
+  const calc = calculateCommission(instructor, students, appData.settings);
+  const message = generateCommissionMessage(instructor, selectedMonth, calc);
+
+  document.getElementById('modalTitle').textContent = `${instructor.name} 급여 확인 문자`;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="message-preview">${message}</div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">닫기</button>
+    <button class="btn btn-success" onclick="copyMessage(\`${encodeURIComponent(message)}\`)">복사하기</button>
+  `;
+  openModal();
 }
 
 function showMessageModal(staffId) {
@@ -910,25 +1495,58 @@ function generateAllMessages() {
     return logs.reduce((sum, log) => sum + log.hours, 0) > 0;
   });
 
+  const commissionWithStudents = appData.commissionInstructors.filter(instructor => {
+    const students = getCommissionStudents(instructor.id, selectedMonth);
+    return students.length > 0;
+  });
+
   let html = '<div class="card"><div class="card-header"><h3 class="card-title">전체 문자 목록</h3></div>';
 
-  staffWithWork.forEach(staff => {
-    const logs = getStaffWorkLogs(staff.id, selectedMonth);
-    const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
-    const wage = calculateWage(staff, totalHours);
-    const ded = calculateDeduction(staff, wage.grossPay, appData.settings);
-    const message = generatePayrollMessage(staff, selectedMonth, totalHours, wage, ded);
+  // 시급제 직원 문자
+  if (staffWithWork.length > 0) {
+    html += '<h4 style="padding: 1rem 1rem 0; color: var(--primary);">시급제 직원</h4>';
+    staffWithWork.forEach(staff => {
+      const logs = getStaffWorkLogs(staff.id, selectedMonth);
+      const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
+      const wage = calculateWage(staff, totalHours);
+      const ded = calculateDeduction(staff, wage.grossPay, appData.settings);
+      const message = generatePayrollMessage(staff, selectedMonth, totalHours, wage, ded);
 
-    html += `
-      <div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--bg); border-radius: 10px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
-          <strong>${staff.name}</strong>
-          <button class="btn btn-success btn-sm" onclick="copyMessage(\`${encodeURIComponent(message)}\`)">복사</button>
+      html += `
+        <div style="margin: 1rem; padding: 1rem; background: var(--bg); border-radius: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <strong>${staff.name}</strong>
+            <button class="btn btn-success btn-sm" onclick="copyMessage(\`${encodeURIComponent(message)}\`)">복사</button>
+          </div>
+          <div class="message-preview" style="font-size: 0.8125rem;">${message}</div>
         </div>
-        <div class="message-preview" style="font-size: 0.8125rem;">${message}</div>
-      </div>
-    `;
-  });
+      `;
+    });
+  }
+
+  // 비율제 강사 문자
+  if (commissionWithStudents.length > 0) {
+    html += '<h4 style="padding: 1rem 1rem 0; color: var(--accent);">비율제 강사</h4>';
+    commissionWithStudents.forEach(instructor => {
+      const students = getCommissionStudents(instructor.id, selectedMonth);
+      const calc = calculateCommission(instructor, students, appData.settings);
+      const message = generateCommissionMessage(instructor, selectedMonth, calc);
+
+      html += `
+        <div style="margin: 1rem; padding: 1rem; background: var(--bg); border-radius: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <strong>${instructor.name}</strong> <span style="color: var(--text-light); font-size: 0.875rem;">(${formatPercent(instructor.commissionRate)})</span>
+            <button class="btn btn-success btn-sm" onclick="copyMessage(\`${encodeURIComponent(message)}\`)">복사</button>
+          </div>
+          <div class="message-preview" style="font-size: 0.8125rem;">${message}</div>
+        </div>
+      `;
+    });
+  }
+
+  if (staffWithWork.length === 0 && commissionWithStudents.length === 0) {
+    html += '<div class="empty-state" style="padding: 2rem;">이 달의 급여 정산 대상자가 없습니다.</div>';
+  }
 
   html += '</div>';
   document.getElementById('allMessagesContainer').innerHTML = html;
@@ -964,6 +1582,10 @@ function renderSettings(container) {
           <label class="form-label">강사 사업소득세율 (%)</label>
           <input type="number" id="instructorRate" class="form-input" value="${appData.settings.instructorDeduction * 100}" step="0.1" min="0" max="100">
         </div>
+        <div class="form-group">
+          <label class="form-label">카드 수수료율 (%, 비율제 강사용)</label>
+          <input type="number" id="cardFeeRate" class="form-input" value="${appData.settings.cardFeeRate * 100}" step="0.1" min="0" max="100">
+        </div>
       </div>
       <button class="btn btn-primary" onclick="saveSettings()">설정 저장</button>
     </div>
@@ -973,7 +1595,8 @@ function renderSettings(container) {
         <h3 class="card-title">시스템 정보</h3>
       </div>
       <div style="color: var(--text-light); font-size: 0.875rem;">
-        <p>등록된 직원 수: ${appData.staff.length}명</p>
+        <p>등록된 시급제 직원 수: ${appData.staff.length}명</p>
+        <p>등록된 비율제 강사 수: ${appData.commissionInstructors.length}명</p>
         <p>총 근무기록 수: ${appData.workLogs.length}건</p>
         <p>현재 최저시급: ${formatKRW(MINIMUM_WAGE)}</p>
       </div>
@@ -1004,6 +1627,7 @@ function handleResetData() {
 function saveSettings() {
   appData.settings.assistantDeduction = parseFloat(document.getElementById('assistantRate').value) / 100;
   appData.settings.instructorDeduction = parseFloat(document.getElementById('instructorRate').value) / 100;
+  appData.settings.cardFeeRate = parseFloat(document.getElementById('cardFeeRate').value) / 100;
   saveData(appData);
   showToast('설정이 저장되었습니다.');
 }

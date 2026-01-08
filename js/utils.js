@@ -77,7 +77,7 @@ function calculateWage(staff, totalHours) {
   }
 }
 
-// 공제액 계산
+// 공제액 계산 (시급제)
 function calculateDeduction(staff, grossPay, settings) {
   let rate = 0;
   let typeName = '';
@@ -96,6 +96,56 @@ function calculateDeduction(staff, grossPay, settings) {
     typeName,
     deduction,
     netPay: grossPay - deduction
+  };
+}
+
+// ============ 비율제 강사 정산 계산 ============
+
+/**
+ * 비율제 강사 정산 계산
+ * 계산 순서:
+ * 1. 총 수강료 합계
+ * 2. 카드 수수료 1% 공제 (전체 수강료에서)
+ * 3. 강사 비율 적용
+ * 4. 사업소득세 3.3% 공제 (강사 몫에서)
+ * 5. 실지급액 산출
+ */
+function calculateCommission(instructor, students, settings) {
+  // 1. 총 수강료 합계
+  const totalTuition = students.reduce((sum, s) => sum + (s.tuition || 0), 0);
+
+  // 2. 카드 수수료 공제
+  const cardFee = Math.round(totalTuition * settings.cardFeeRate);
+  const afterCardFee = totalTuition - cardFee;
+
+  // 3. 강사 비율 적용
+  const instructorGross = Math.round(afterCardFee * instructor.commissionRate);
+  const academyShare = afterCardFee - instructorGross;
+
+  // 4. 사업소득세 공제
+  const incomeTax = Math.round(instructorGross * settings.instructorDeduction);
+
+  // 5. 실지급액
+  const netPay = instructorGross - incomeTax;
+
+  // 총 공제액
+  const totalDeduction = cardFee + incomeTax;
+
+  // 정산 내역 문자열
+  const ratePercent = Math.round(instructor.commissionRate * 100);
+  const breakdown = `수강료 ${formatKRW(totalTuition)} - 카드1% ${formatKRW(cardFee)} = ${formatKRW(afterCardFee)} × ${ratePercent}%`;
+
+  return {
+    totalTuition,
+    cardFee,
+    afterCardFee,
+    instructorGross,
+    academyShare,
+    incomeTax,
+    netPay,
+    totalDeduction,
+    breakdown,
+    studentCount: students.length
   };
 }
 
@@ -156,7 +206,97 @@ function downloadCSV(csvContent, filename) {
   document.body.removeChild(link);
 }
 
-// 급여 확인 문자 생성
+// ============ CSV/Excel 파싱 ============
+
+/**
+ * CSV 문자열을 파싱하여 학생 배열로 반환
+ * 예상 형식: 학생명,수강료 (첫 번째 줄은 헤더로 간주)
+ */
+function parseStudentCSV(csvText) {
+  const lines = csvText.trim().split('\n');
+  const students = [];
+
+  // 첫 번째 줄은 헤더로 건너뛰기 (선택적)
+  const startIndex = lines[0].includes('학생') || lines[0].includes('이름') || lines[0].includes('수강') ? 1 : 0;
+
+  for (let i = startIndex; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    // CSV 파싱 (쉼표 또는 탭 구분)
+    let cells;
+    if (line.includes('\t')) {
+      cells = line.split('\t');
+    } else {
+      cells = parseCSVLine(line);
+    }
+
+    if (cells.length >= 2) {
+      const name = cells[0].trim();
+      const tuition = parseInt(cells[1].replace(/[^\d]/g, '')) || 0;
+
+      if (name && tuition > 0) {
+        students.push({ name, tuition });
+      }
+    }
+  }
+
+  return students;
+}
+
+/**
+ * CSV 한 줄 파싱 (따옴표 처리)
+ */
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      result.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+
+  result.push(current);
+  return result;
+}
+
+/**
+ * 파일 객체에서 CSV 읽기
+ */
+function readCSVFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const students = parseStudentCSV(text);
+        resolve(students);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsText(file, 'UTF-8');
+  });
+}
+
+// ============ 문자 생성 ============
+
+// 급여 확인 문자 생성 (시급제)
 function generatePayrollMessage(staff, monthKey, totalHours, wage, ded) {
   const { month } = parseMonthKey(monthKey);
 
@@ -177,4 +317,30 @@ function generatePayrollMessage(staff, monthKey, totalHours, wage, ded) {
   message += `맞는지 확인 후 답변 부탁드립니다.`;
 
   return message;
+}
+
+// 급여 확인 문자 생성 (비율제)
+function generateCommissionMessage(instructor, monthKey, calc) {
+  const { month } = parseMonthKey(monthKey);
+  const ratePercent = Math.round(instructor.commissionRate * 100);
+
+  let message = `[${month}월 급여 정산 확인 요청]\n`;
+  message += `${instructor.name}님, ${month}월 급여 정산 내역 공유드립니다.\n\n`;
+
+  message += `• 담당 학생 수: ${calc.studentCount}명\n`;
+  message += `• 총 수강료: ${formatKRW(calc.totalTuition)}\n`;
+  message += `• 카드수수료(1%): -${formatKRW(calc.cardFee)}\n`;
+  message += `• 수수료 공제 후: ${formatKRW(calc.afterCardFee)}\n`;
+  message += `• 강사 비율(${ratePercent}%): ${formatKRW(calc.instructorGross)}\n\n`;
+
+  message += `사업소득세(3.3%) 공제: -${formatKRW(calc.incomeTax)}\n`;
+  message += `→ 최종 지급예정액: ${formatKRW(calc.netPay)}\n\n`;
+  message += `맞는지 확인 후 답변 부탁드립니다.`;
+
+  return message;
+}
+
+// 퍼센트 포맷 (비율 → 표시용)
+function formatPercent(rate) {
+  return Math.round(rate * 100) + '%';
 }
