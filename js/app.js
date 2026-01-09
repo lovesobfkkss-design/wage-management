@@ -7,6 +7,7 @@ let currentUser = null;
 let currentTab = 'dashboard';
 let selectedMonth = getMonthKey();
 let selectedRole = 'admin';
+let selectedBusiness = 'all';  // 'all' 또는 businessId
 
 // ============ 로그인 관련 ============
 function selectRole(role) {
@@ -61,7 +62,36 @@ function logout() {
 function showMainApp() {
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('mainApp').classList.remove('hidden');
+  renderBusinessSelector();
   renderNavTabs();
+  renderContent();
+}
+
+// ============ 사업장 선택 ============
+function renderBusinessSelector() {
+  const container = document.getElementById('businessSelector');
+
+  // 관리자만 사업장 선택 표시
+  if (currentUser.role !== 'admin') {
+    container.innerHTML = '';
+    return;
+  }
+
+  const options = appData.businesses.map(b =>
+    `<option value="${b.id}" ${selectedBusiness === b.id ? 'selected' : ''}>${b.name}</option>`
+  ).join('');
+
+  container.innerHTML = `
+    <label>사업장:</label>
+    <select onchange="changeBusiness(this.value)">
+      <option value="all" ${selectedBusiness === 'all' ? 'selected' : ''}>전체</option>
+      ${options}
+    </select>
+  `;
+}
+
+function changeBusiness(value) {
+  selectedBusiness = value === 'all' ? 'all' : parseInt(value);
   renderContent();
 }
 
@@ -140,12 +170,17 @@ function renderDashboard(container) {
   const monthKey = getMonthKey();
   const { year, month } = parseMonthKey(monthKey);
 
+  // 선택된 사업장에 따라 직원 필터링
+  const filteredStaff = getStaffByBusiness(selectedBusiness);
+  const filteredInstructors = getCommissionInstructorsByBusiness(selectedBusiness);
+
   let totalGross = 0;
   let totalNet = 0;
   let totalDeductions = 0;
-  let staffCount = appData.staff.length;
+  const staffCount = filteredStaff.length + filteredInstructors.length;
 
-  appData.staff.forEach(staff => {
+  // 시급제 직원 계산
+  filteredStaff.forEach(staff => {
     const logs = getStaffWorkLogs(staff.id, monthKey);
     const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
     const wage = calculateWage(staff, totalHours);
@@ -155,8 +190,22 @@ function renderDashboard(container) {
     totalNet += ded.netPay;
   });
 
+  // 비율제 강사 계산
+  filteredInstructors.forEach(instructor => {
+    const students = getCommissionStudents(instructor.id, monthKey);
+    if (students.length > 0) {
+      const calc = calculateCommission(instructor, students, appData.settings);
+      totalGross += calc.instructorGross;
+      totalDeductions += calc.totalDeduction;
+      totalNet += calc.netPay;
+    }
+  });
+
+  // 사업장 이름 표시
+  const businessTitle = selectedBusiness === 'all' ? '전체' : getBusinessName(selectedBusiness);
+
   container.innerHTML = `
-    <h2 style="margin-bottom: 1.5rem; color: var(--primary);">${year}년 ${month}월 대시보드</h2>
+    <h2 style="margin-bottom: 1.5rem; color: var(--primary);">${year}년 ${month}월 대시보드 - ${businessTitle}</h2>
 
     <div class="summary-grid">
       <div class="summary-card primary">
@@ -177,7 +226,7 @@ function renderDashboard(container) {
       <div class="summary-card">
         <div class="summary-label" style="color: var(--text-light);">등록 직원수</div>
         <div class="summary-value" style="color: var(--primary);">${staffCount}명</div>
-        <div class="summary-sub" style="color: var(--text-light);">조교 + 강사</div>
+        <div class="summary-sub" style="color: var(--text-light);">시급제 + 비율제</div>
       </div>
     </div>
 
@@ -190,25 +239,47 @@ function renderDashboard(container) {
           <thead>
             <tr>
               <th>이름</th>
-              <th>총 근무시간</th>
+              <th>소속</th>
+              <th>유형</th>
+              <th>근무/수강료</th>
               <th>세전 급여</th>
               <th>공제액</th>
               <th>실지급액</th>
             </tr>
           </thead>
           <tbody>
-            ${appData.staff.map(staff => {
+            ${filteredStaff.map(staff => {
               const logs = getStaffWorkLogs(staff.id, monthKey);
               const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
               const wage = calculateWage(staff, totalHours);
               const ded = calculateDeduction(staff, wage.grossPay, appData.settings);
+              const typeName = staff.type === 'assistant' ? '조교' : '파트강사';
+              const businessName = getBusinessName(staff.businessId);
               return `
                 <tr>
                   <td><strong>${staff.name}</strong></td>
+                  <td><span class="badge badge-business">${businessName}</span></td>
+                  <td><span class="badge ${staff.type === 'assistant' ? 'badge-assistant' : 'badge-instructor'}">${typeName}</span></td>
                   <td>${formatHours(totalHours)}</td>
                   <td>${formatKRW(wage.grossPay)}</td>
                   <td style="color: var(--danger);">-${formatKRW(ded.deduction)}</td>
                   <td><strong>${formatKRW(ded.netPay)}</strong></td>
+                </tr>
+              `;
+            }).join('')}
+            ${filteredInstructors.map(instructor => {
+              const students = getCommissionStudents(instructor.id, monthKey);
+              const calc = students.length > 0 ? calculateCommission(instructor, students, appData.settings) : null;
+              const businessName = getBusinessName(instructor.businessId);
+              return `
+                <tr>
+                  <td><strong>${instructor.name}</strong></td>
+                  <td><span class="badge badge-business">${businessName}</span></td>
+                  <td><span class="badge badge-part">비율제</span></td>
+                  <td>${calc ? formatKRW(calc.totalTuition) : '-'}</td>
+                  <td>${calc ? formatKRW(calc.instructorGross) : '-'}</td>
+                  <td style="color: var(--danger);">${calc ? '-' + formatKRW(calc.totalDeduction) : '-'}</td>
+                  <td><strong>${calc ? formatKRW(calc.netPay) : '-'}</strong></td>
                 </tr>
               `;
             }).join('')}
@@ -221,6 +292,9 @@ function renderDashboard(container) {
 
 // ============ 직원관리 ============
 function renderStaffManagement(container) {
+  // 선택된 사업장에 따라 직원 필터링
+  const filteredStaff = getStaffByBusiness(selectedBusiness);
+
   container.innerHTML = `
     <div class="card">
       <div class="card-header">
@@ -232,6 +306,7 @@ function renderStaffManagement(container) {
           <thead>
             <tr>
               <th>이름</th>
+              <th>소속</th>
               <th>유형</th>
               <th>시급 정보</th>
               <th>공제 유형</th>
@@ -239,7 +314,7 @@ function renderStaffManagement(container) {
             </tr>
           </thead>
           <tbody>
-            ${appData.staff.map(staff => {
+            ${filteredStaff.map(staff => {
               let wageInfo = '';
               if (staff.tier1Hours > 0) {
                 wageInfo = `첫 ${staff.tier1Hours}시간: ${formatKRW(staff.tier1Rate)}, 이후: ${formatKRW(staff.tier2Rate)}`;
@@ -248,9 +323,11 @@ function renderStaffManagement(container) {
               }
               const typeName = staff.type === 'assistant' ? '조교' : '강사';
               const deductionType = staff.type === 'assistant' ? '고용보험 0.8%' : '3.3%';
+              const businessName = getBusinessName(staff.businessId);
               return `
                 <tr>
                   <td><strong>${staff.name}</strong></td>
+                  <td><span class="badge badge-business">${businessName}</span></td>
                   <td><span class="badge ${staff.type === 'assistant' ? 'badge-assistant' : 'badge-instructor'}">${typeName}</span></td>
                   <td style="font-size: 0.8125rem;">${wageInfo}</td>
                   <td style="font-size: 0.8125rem;">${deductionType}</td>
@@ -271,12 +348,30 @@ function renderStaffManagement(container) {
 }
 
 function getStaffFormHTML(staff = null) {
+  const businessOptions = appData.businesses.map(b =>
+    `<option value="${b.id}" ${staff?.businessId === b.id ? 'selected' : ''}>${b.name}</option>`
+  ).join('');
+
+  // 기본 선택 사업장 결정: 수정 시 기존 값, 추가 시 선택된 사업장 또는 첫번째 사업장
+  const defaultBusinessId = staff?.businessId ||
+    (selectedBusiness !== 'all' ? selectedBusiness : appData.businesses[0]?.id);
+
   return `
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">이름 *</label>
         <input type="text" id="staffName" class="form-input" value="${staff?.name || ''}" required>
       </div>
+      <div class="form-group">
+        <label class="form-label">소속 사업장 *</label>
+        <select id="staffBusinessId" class="form-select">
+          ${appData.businesses.map(b =>
+            `<option value="${b.id}" ${defaultBusinessId === b.id ? 'selected' : ''}>${b.name}</option>`
+          ).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
       <div class="form-group">
         <label class="form-label">공제 유형 *</label>
         <select id="staffType" class="form-select">
@@ -347,6 +442,7 @@ function saveNewStaff() {
 
   addStaff({
     name,
+    businessId: parseInt(document.getElementById('staffBusinessId').value),
     type: document.getElementById('staffType').value,
     hourlyRate: parseInt(document.getElementById('tier2Rate').value) || 12000,
     tier1Hours: parseInt(document.getElementById('tier1Hours').value) || 0,
@@ -369,6 +465,7 @@ function saveEditStaff(staffId) {
 
   updateStaff(staffId, {
     name,
+    businessId: parseInt(document.getElementById('staffBusinessId').value),
     type: document.getElementById('staffType').value,
     hourlyRate: parseInt(document.getElementById('tier2Rate').value) || 12000,
     tier1Hours: parseInt(document.getElementById('tier1Hours').value) || 0,
@@ -395,6 +492,8 @@ let selectedCommissionInstructor = null;
 
 function renderCommissionInstructors(container) {
   const { year, month } = parseMonthKey(selectedMonth);
+  // 선택된 사업장에 따라 강사 필터링
+  const filteredInstructors = getCommissionInstructorsByBusiness(selectedBusiness);
 
   container.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
@@ -416,6 +515,7 @@ function renderCommissionInstructors(container) {
           <thead>
             <tr>
               <th>이름</th>
+              <th>소속</th>
               <th>비율</th>
               <th>${month}월 학생수</th>
               <th>${month}월 수강료</th>
@@ -424,12 +524,14 @@ function renderCommissionInstructors(container) {
             </tr>
           </thead>
           <tbody>
-            ${appData.commissionInstructors.length > 0 ? appData.commissionInstructors.map(instructor => {
+            ${filteredInstructors.length > 0 ? filteredInstructors.map(instructor => {
               const students = getCommissionStudents(instructor.id, selectedMonth);
               const calc = students.length > 0 ? calculateCommission(instructor, students, appData.settings) : null;
+              const businessName = getBusinessName(instructor.businessId);
               return `
                 <tr>
                   <td><strong>${instructor.name}</strong></td>
+                  <td><span class="badge badge-business">${businessName}</span></td>
                   <td><span class="badge badge-part">${formatPercent(instructor.commissionRate)}</span></td>
                   <td>${students.length}명</td>
                   <td>${calc ? formatKRW(calc.totalTuition) : '-'}</td>
@@ -443,7 +545,7 @@ function renderCommissionInstructors(container) {
                   </td>
                 </tr>
               `;
-            }).join('') : '<tr><td colspan="6" class="empty-state">등록된 비율제 강사가 없습니다.</td></tr>'}
+            }).join('') : '<tr><td colspan="7" class="empty-state">등록된 비율제 강사가 없습니다.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -454,11 +556,24 @@ function renderCommissionInstructors(container) {
 }
 
 function openAddCommissionInstructorModal() {
+  // 기본 선택 사업장 결정
+  const defaultBusinessId = selectedBusiness !== 'all' ? selectedBusiness : appData.businesses[0]?.id;
+
   document.getElementById('modalTitle').textContent = '비율제 강사 추가';
   document.getElementById('modalBody').innerHTML = `
-    <div class="form-group">
-      <label class="form-label">이름 *</label>
-      <input type="text" id="commInstructorName" class="form-input" placeholder="강사 이름">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">이름 *</label>
+        <input type="text" id="commInstructorName" class="form-input" placeholder="강사 이름">
+      </div>
+      <div class="form-group">
+        <label class="form-label">소속 사업장 *</label>
+        <select id="commInstructorBusinessId" class="form-select">
+          ${appData.businesses.map(b =>
+            `<option value="${b.id}" ${defaultBusinessId === b.id ? 'selected' : ''}>${b.name}</option>`
+          ).join('')}
+        </select>
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">강사 비율 (%) *</label>
@@ -485,9 +600,19 @@ function openEditCommissionInstructorModal(id) {
   const instructor = getCommissionInstructorById(id);
   document.getElementById('modalTitle').textContent = '비율제 강사 수정';
   document.getElementById('modalBody').innerHTML = `
-    <div class="form-group">
-      <label class="form-label">이름 *</label>
-      <input type="text" id="commInstructorName" class="form-input" value="${instructor.name}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">이름 *</label>
+        <input type="text" id="commInstructorName" class="form-input" value="${instructor.name}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">소속 사업장 *</label>
+        <select id="commInstructorBusinessId" class="form-select">
+          ${appData.businesses.map(b =>
+            `<option value="${b.id}" ${instructor.businessId === b.id ? 'selected' : ''}>${b.name}</option>`
+          ).join('')}
+        </select>
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">강사 비율 (%) *</label>
@@ -505,6 +630,7 @@ function openEditCommissionInstructorModal(id) {
 function saveNewCommissionInstructor() {
   const name = document.getElementById('commInstructorName').value.trim();
   const ratePercent = parseInt(document.getElementById('commInstructorRate').value);
+  const businessId = parseInt(document.getElementById('commInstructorBusinessId').value);
 
   if (!name) {
     alert('이름을 입력해주세요.');
@@ -517,7 +643,8 @@ function saveNewCommissionInstructor() {
 
   addCommissionInstructor({
     name,
-    commissionRate: ratePercent / 100
+    commissionRate: ratePercent / 100,
+    businessId
   });
 
   closeModal();
@@ -528,6 +655,7 @@ function saveNewCommissionInstructor() {
 function saveEditCommissionInstructor(id) {
   const name = document.getElementById('commInstructorName').value.trim();
   const ratePercent = parseInt(document.getElementById('commInstructorRate').value);
+  const businessId = parseInt(document.getElementById('commInstructorBusinessId').value);
 
   if (!name) {
     alert('이름을 입력해주세요.');
@@ -536,7 +664,8 @@ function saveEditCommissionInstructor(id) {
 
   updateCommissionInstructor(id, {
     name,
-    commissionRate: ratePercent / 100
+    commissionRate: ratePercent / 100,
+    businessId
   });
 
   closeModal();
@@ -939,12 +1068,16 @@ function confirmDeleteWorkLog(logId) {
 function renderPayroll(container) {
   const { year, month } = parseMonthKey(selectedMonth);
 
+  // 선택된 사업장에 따라 직원/강사 필터링
+  const filteredStaff = getStaffByBusiness(selectedBusiness);
+  const filteredInstructors = getCommissionInstructorsByBusiness(selectedBusiness);
+
   let totalGross = 0;
   let totalDeductions = 0;
   let totalNet = 0;
 
   // 시급제 직원 정산
-  const hourlyPayrollData = appData.staff.map(staff => {
+  const hourlyPayrollData = filteredStaff.map(staff => {
     const logs = getStaffWorkLogs(staff.id, selectedMonth);
     const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
     const wage = calculateWage(staff, totalHours);
@@ -958,7 +1091,7 @@ function renderPayroll(container) {
   }).filter(item => item.totalHours > 0);
 
   // 비율제 강사 정산
-  const commissionPayrollData = appData.commissionInstructors.map(instructor => {
+  const commissionPayrollData = filteredInstructors.map(instructor => {
     const students = getCommissionStudents(instructor.id, selectedMonth);
     if (students.length === 0) return null;
 
@@ -971,9 +1104,12 @@ function renderPayroll(container) {
     return { instructor, calc, type: 'commission' };
   }).filter(item => item !== null);
 
+  // 사업장 이름 표시
+  const businessTitle = selectedBusiness === 'all' ? '전체' : getBusinessName(selectedBusiness);
+
   container.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-      <h2 style="color: var(--primary);">${year}년 ${month}월 급여 정산</h2>
+      <h2 style="color: var(--primary);">${year}년 ${month}월 급여 정산 - ${businessTitle}</h2>
       <div style="display: flex; gap: 1rem; align-items: center;">
         <div class="month-selector">
           <input type="month" value="${selectedMonth}" onchange="changeMonth(this.value)">
@@ -1007,6 +1143,7 @@ function renderPayroll(container) {
           <thead>
             <tr>
               <th>이름</th>
+              <th>소속</th>
               <th>유형</th>
               <th>근무시간</th>
               <th>산출 내역</th>
@@ -1020,9 +1157,11 @@ function renderPayroll(container) {
             ${hourlyPayrollData.map(item => {
               const { staff, totalHours, wage, ded } = item;
               const typeName = staff.type === 'assistant' ? '조교' : '파트강사';
+              const businessName = getBusinessName(staff.businessId);
               return `
                 <tr>
                   <td><strong>${staff.name}</strong></td>
+                  <td><span class="badge badge-business">${businessName}</span></td>
                   <td><span class="badge ${staff.type === 'assistant' ? 'badge-assistant' : 'badge-instructor'}">${typeName}</span></td>
                   <td>${formatHours(totalHours)}</td>
                   <td style="font-size: 0.8125rem;">${wage.breakdown}</td>
@@ -1054,6 +1193,7 @@ function renderPayroll(container) {
           <thead>
             <tr>
               <th>이름</th>
+              <th>소속</th>
               <th>비율</th>
               <th>학생수</th>
               <th>총 수강료</th>
@@ -1066,9 +1206,11 @@ function renderPayroll(container) {
           <tbody>
             ${commissionPayrollData.map(item => {
               const { instructor, calc } = item;
+              const businessName = getBusinessName(instructor.businessId);
               return `
                 <tr>
                   <td><strong>${instructor.name}</strong></td>
+                  <td><span class="badge badge-business">${businessName}</span></td>
                   <td><span class="badge badge-part">${formatPercent(instructor.commissionRate)}</span></td>
                   <td>${calc.studentCount}명</td>
                   <td>${formatKRW(calc.totalTuition)}</td>
@@ -1557,6 +1699,42 @@ function renderSettings(container) {
   container.innerHTML = `
     <div class="card">
       <div class="card-header">
+        <h3 class="card-title">사업장 관리</h3>
+        <button class="btn btn-primary btn-sm" onclick="openAddBusinessModal()">+ 사업장 추가</button>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>사업장명</th>
+              <th>소속 직원</th>
+              <th>관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${appData.businesses.map(business => {
+              const staffCount = appData.staff.filter(s => s.businessId === business.id).length;
+              const instructorCount = appData.commissionInstructors.filter(i => i.businessId === business.id).length;
+              return `
+                <tr>
+                  <td><strong>${business.name}</strong></td>
+                  <td>${staffCount + instructorCount}명 (시급제 ${staffCount}, 비율제 ${instructorCount})</td>
+                  <td>
+                    <div class="actions">
+                      <button class="btn btn-outline btn-sm" onclick="openEditBusinessModal(${business.id})">수정</button>
+                      <button class="btn btn-danger btn-sm" onclick="confirmDeleteBusiness(${business.id})">삭제</button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
         <h3 class="card-title">데이터 관리</h3>
       </div>
       <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
@@ -1595,6 +1773,7 @@ function renderSettings(container) {
         <h3 class="card-title">시스템 정보</h3>
       </div>
       <div style="color: var(--text-light); font-size: 0.875rem;">
+        <p>등록된 사업장 수: ${appData.businesses.length}개</p>
         <p>등록된 시급제 직원 수: ${appData.staff.length}명</p>
         <p>등록된 비율제 강사 수: ${appData.commissionInstructors.length}명</p>
         <p>총 근무기록 수: ${appData.workLogs.length}건</p>
@@ -1602,6 +1781,77 @@ function renderSettings(container) {
       </div>
     </div>
   `;
+}
+
+// ============ 사업장 관리 모달 ============
+function openAddBusinessModal() {
+  document.getElementById('modalTitle').textContent = '사업장 추가';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">사업장명 *</label>
+      <input type="text" id="businessName" class="form-input" placeholder="학원 이름">
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveNewBusiness()">저장</button>
+  `;
+  openModal();
+}
+
+function openEditBusinessModal(id) {
+  const business = getBusinessById(id);
+  document.getElementById('modalTitle').textContent = '사업장 수정';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">사업장명 *</label>
+      <input type="text" id="businessName" class="form-input" value="${business.name}">
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveEditBusiness(${id})">저장</button>
+  `;
+  openModal();
+}
+
+function saveNewBusiness() {
+  const name = document.getElementById('businessName').value.trim();
+  if (!name) {
+    alert('사업장명을 입력해주세요.');
+    return;
+  }
+
+  addBusiness(name);
+  closeModal();
+  renderBusinessSelector();
+  renderContent();
+  showToast('사업장이 추가되었습니다.');
+}
+
+function saveEditBusiness(id) {
+  const name = document.getElementById('businessName').value.trim();
+  if (!name) {
+    alert('사업장명을 입력해주세요.');
+    return;
+  }
+
+  updateBusiness(id, name);
+  closeModal();
+  renderBusinessSelector();
+  renderContent();
+  showToast('사업장 정보가 수정되었습니다.');
+}
+
+function confirmDeleteBusiness(id) {
+  const result = deleteBusiness(id);
+  if (result.success) {
+    renderBusinessSelector();
+    renderContent();
+    showToast('사업장이 삭제되었습니다.');
+  } else {
+    alert(result.message);
+  }
 }
 
 function handleImportJSON(input) {

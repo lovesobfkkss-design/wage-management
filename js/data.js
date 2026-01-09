@@ -8,23 +8,28 @@ const ADMIN_PASSWORD = '1234'; // 실제로는 더 안전하게 관리하세요
 // 기본 데이터 구조
 function getDefaultData() {
   return {
+    // 사업장 목록
+    businesses: [
+      { id: 1, name: '강한코칭학원' },
+      { id: 2, name: '강한영어수학학원' }
+    ],
     // 시급제 직원 (조교, 파트강사)
     staff: [
-      // 시급제 조교들
-      { id: 1, name: '박태균', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000 },
-      { id: 2, name: '김시연', type: 'assistant', hourlyRate: 12000, tier1Hours: 3, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000 },
-      { id: 3, name: '이재준', type: 'assistant', hourlyRate: 12000, tier1Hours: 4, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000 },
-      { id: 4, name: '이예원', type: 'assistant', hourlyRate: 12000, tier1Hours: 5, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000 },
-      { id: 5, name: '김은재', type: 'assistant', hourlyRate: 12000, tier1Hours: 3, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000 },
-      { id: 6, name: '김주은', type: 'assistant', hourlyRate: 12000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 12000 },
-      { id: 7, name: '인지원', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000 },
-      { id: 8, name: '김세희', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000 },
-      { id: 9, name: '홍대현', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000 },
-      { id: 10, name: '박범수', type: 'assistant', hourlyRate: 12000, tier1Hours: 6, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000 },
-      { id: 11, name: '박소은', type: 'assistant', hourlyRate: 12000, tier1Hours: 4, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000 },
+      // 시급제 조교들 - 기본값으로 강한영어수학학원(id:2) 소속
+      { id: 1, name: '박태균', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000, businessId: 2 },
+      { id: 2, name: '김시연', type: 'assistant', hourlyRate: 12000, tier1Hours: 3, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2 },
+      { id: 3, name: '이재준', type: 'assistant', hourlyRate: 12000, tier1Hours: 4, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2 },
+      { id: 4, name: '이예원', type: 'assistant', hourlyRate: 12000, tier1Hours: 5, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2 },
+      { id: 5, name: '김은재', type: 'assistant', hourlyRate: 12000, tier1Hours: 3, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2 },
+      { id: 6, name: '김주은', type: 'assistant', hourlyRate: 12000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 12000, businessId: 2 },
+      { id: 7, name: '인지원', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000, businessId: 2 },
+      { id: 8, name: '김세희', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000, businessId: 2 },
+      { id: 9, name: '홍대현', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000, businessId: 2 },
+      { id: 10, name: '박범수', type: 'assistant', hourlyRate: 12000, tier1Hours: 6, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2 },
+      { id: 11, name: '박소은', type: 'assistant', hourlyRate: 12000, tier1Hours: 4, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2 },
       // 시급제 파트강사들
-      { id: 14, name: '김준경', type: 'partInstructor', hourlyRate: 25000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 25000, roundingRule: 'hour' },
-      { id: 15, name: '오혜림', type: 'partInstructor', hourlyRate: 25000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 25000, roundingRule: 'half' },
+      { id: 14, name: '김준경', type: 'partInstructor', hourlyRate: 25000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 25000, roundingRule: 'hour', businessId: 2 },
+      { id: 15, name: '오혜림', type: 'partInstructor', hourlyRate: 25000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 25000, roundingRule: 'half', businessId: 2 },
     ],
     // 근무 기록 (시급제)
     workLogs: [],
@@ -52,6 +57,23 @@ function loadData() {
     if (!data.commissionInstructors) data.commissionInstructors = [];
     if (!data.commissionStudents) data.commissionStudents = [];
     if (!data.settings.cardFeeRate) data.settings.cardFeeRate = 0.01;
+
+    // 사업장 데이터 호환성 처리
+    if (!data.businesses) {
+      data.businesses = [
+        { id: 1, name: '강한코칭학원' },
+        { id: 2, name: '강한영어수학학원' }
+      ];
+    }
+    // 기존 직원에 businessId 없으면 기본값(2: 강한영어수학학원) 할당
+    data.staff.forEach(s => {
+      if (!s.businessId) s.businessId = 2;
+    });
+    // 기존 비율제 강사에 businessId 없으면 기본값 할당
+    data.commissionInstructors.forEach(i => {
+      if (!i.businessId) i.businessId = 2;
+    });
+
     return data;
   }
   return getDefaultData();
@@ -60,6 +82,69 @@ function loadData() {
 // 데이터 저장
 function saveData(data) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+// ============ 사업장 관리 ============
+
+// 사업장 조회
+function getBusinessById(id) {
+  return appData.businesses.find(b => b.id === id);
+}
+
+// 사업장 이름 조회
+function getBusinessName(id) {
+  const business = getBusinessById(id);
+  return business ? business.name : '미지정';
+}
+
+// 사업장 추가
+function addBusiness(name) {
+  const newId = Math.max(...appData.businesses.map(b => b.id), 0) + 1;
+  const newBusiness = { id: newId, name };
+  appData.businesses.push(newBusiness);
+  saveData(appData);
+  return newBusiness;
+}
+
+// 사업장 수정
+function updateBusiness(id, name) {
+  const business = getBusinessById(id);
+  if (business) {
+    business.name = name;
+    saveData(appData);
+  }
+  return business;
+}
+
+// 사업장 삭제 (소속 직원이 있으면 삭제 불가)
+function deleteBusiness(id) {
+  // 소속 직원 확인
+  const hasStaff = appData.staff.some(s => s.businessId === id);
+  const hasInstructor = appData.commissionInstructors.some(i => i.businessId === id);
+
+  if (hasStaff || hasInstructor) {
+    return { success: false, message: '해당 사업장에 소속된 직원이 있어 삭제할 수 없습니다.' };
+  }
+
+  appData.businesses = appData.businesses.filter(b => b.id !== id);
+  saveData(appData);
+  return { success: true };
+}
+
+// 사업장별 직원 목록 조회 (businessId가 'all'이면 전체)
+function getStaffByBusiness(businessId) {
+  if (businessId === 'all') {
+    return appData.staff;
+  }
+  return appData.staff.filter(s => s.businessId === businessId);
+}
+
+// 사업장별 비율제 강사 목록 조회
+function getCommissionInstructorsByBusiness(businessId) {
+  if (businessId === 'all') {
+    return appData.commissionInstructors;
+  }
+  return appData.commissionInstructors.filter(i => i.businessId === businessId);
 }
 
 // ============ 시급제 직원 관리 ============
@@ -145,7 +230,8 @@ function addCommissionInstructor(info) {
   const newInstructor = {
     id: newId,
     name: info.name,
-    commissionRate: info.commissionRate // 강사 몫 비율 (0.5 = 50%)
+    commissionRate: info.commissionRate, // 강사 몫 비율 (0.5 = 50%)
+    businessId: info.businessId // 소속 사업장
   };
   appData.commissionInstructors.push(newInstructor);
   saveData(appData);
@@ -251,6 +337,19 @@ function importDataFromJSON(file) {
           if (!data.commissionStudents) data.commissionStudents = [];
           if (!data.workLogs) data.workLogs = [];
           if (!data.settings.cardFeeRate) data.settings.cardFeeRate = 0.01;
+          // 사업장 데이터 호환성 처리
+          if (!data.businesses) {
+            data.businesses = [
+              { id: 1, name: '강한코칭학원' },
+              { id: 2, name: '강한영어수학학원' }
+            ];
+          }
+          data.staff.forEach(s => {
+            if (!s.businessId) s.businessId = 2;
+          });
+          data.commissionInstructors.forEach(i => {
+            if (!i.businessId) i.businessId = 2;
+          });
           appData = data;
           saveData(appData);
           resolve(data);
