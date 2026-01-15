@@ -1928,6 +1928,7 @@ function renderMyWork(container) {
               <th>퇴근</th>
               <th>근무시간</th>
               <th>메모</th>
+              <th>삭제</th>
             </tr>
           </thead>
           <tbody>
@@ -1938,13 +1939,23 @@ function renderMyWork(container) {
                 <td>${log.endTime || '-'}</td>
                 <td>${formatHours(log.hours)}</td>
                 <td style="font-size: 0.8125rem; color: var(--text-light);">${log.memo || ''}</td>
+                <td><button class="btn btn-danger btn-sm" onclick="deleteMyWorkLog(${log.id})">삭제</button></td>
               </tr>
-            `).join('') || '<tr><td colspan="5" class="empty-state">이 달의 근무기록이 없습니다.</td></tr>'}
+            `).join('') || '<tr><td colspan="6" class="empty-state">이 달의 근무기록이 없습니다.</td></tr>'}
           </tbody>
         </table>
       </div>
     </div>
   `;
+}
+
+// 직원이 자기 근무기록 삭제
+function deleteMyWorkLog(logId) {
+  if (confirm('이 근무기록을 삭제하시겠습니까?')) {
+    deleteWorkLog(logId);
+    renderContent();
+    showToast('근무기록이 삭제되었습니다.');
+  }
 }
 
 // ============ 직원 화면: 출퇴근 기록 ============
@@ -1995,6 +2006,25 @@ function renderClockIn(container) {
         </div>
         <button class="btn btn-primary" style="width: 100%;" onclick="addManualLog()">기록 추가</button>
       </div>
+
+      ${todayLogs.length > 0 ? `
+        <div style="margin-top: 2rem; border-top: 1px solid #eee; padding-top: 1.5rem;">
+          <h4 style="margin-bottom: 0.75rem;">오늘 기록 (${todayLogs.length}건)</h4>
+          <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+            ${todayLogs.map(log => `
+              <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; background: #f5f5f5; border-radius: 8px;">
+                <div>
+                  <span style="font-weight: 600;">${log.startTime || '직접입력'}</span>
+                  ${log.endTime ? ` ~ ${log.endTime}` : ' (퇴근 전)'}
+                  <span style="color: var(--primary); margin-left: 0.5rem;">${formatHours(log.hours)}</span>
+                  ${log.memo ? `<span style="color: var(--text-light); font-size: 0.8rem; margin-left: 0.5rem;">(${log.memo})</span>` : ''}
+                </div>
+                <button class="btn btn-danger btn-sm" onclick="deleteTodayLog(${log.id})">삭제</button>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
     </div>
   `;
 
@@ -2006,6 +2036,15 @@ function updateClock() {
   const el = document.getElementById('currentTime');
   if (el) {
     el.textContent = new Date().toLocaleTimeString('ko-KR');
+  }
+}
+
+// 오늘 기록 삭제
+function deleteTodayLog(logId) {
+  if (confirm('이 기록을 삭제하시겠습니까?')) {
+    deleteWorkLog(logId);
+    renderContent();
+    showToast('기록이 삭제되었습니다.');
   }
 }
 

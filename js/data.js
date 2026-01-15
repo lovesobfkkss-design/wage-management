@@ -1,9 +1,12 @@
 /* ============================================
-   강한영어수학학원 급여관리시스템 - 데이터 관리
+   강한영어수학학원 급여관리시스템 - 데이터 관리 (Firebase 연동)
    ============================================ */
 
 const STORAGE_KEY = 'ganghan_wage_system';
 const ADMIN_PASSWORD = '1234'; // 실제로는 더 안전하게 관리하세요
+
+// Firebase 데이터 참조
+const dataRef = database.ref('appData');
 
 // 기본 데이터 구조
 function getDefaultData() {
@@ -48,41 +51,135 @@ function getDefaultData() {
   };
 }
 
-// 데이터 로드
+// 데이터 호환성 처리
+function ensureDataCompatibility(data) {
+  if (!data) return getDefaultData();
+
+  // 기존 데이터에 새 필드가 없으면 추가
+  if (!data.commissionInstructors) data.commissionInstructors = [];
+  if (!data.commissionStudents) data.commissionStudents = [];
+  if (!data.workLogs) data.workLogs = [];
+  if (!data.settings) data.settings = getDefaultData().settings;
+  if (!data.settings.cardFeeRate) data.settings.cardFeeRate = 0.01;
+
+  // 사업장 데이터 호환성 처리
+  if (!data.businesses) {
+    data.businesses = [
+      { id: 1, name: '강한코칭학원' },
+      { id: 2, name: '강한영어수학학원' }
+    ];
+  }
+
+  // staff가 없으면 기본값 사용
+  if (!data.staff) {
+    data.staff = getDefaultData().staff;
+  }
+
+  // 기존 직원에 businessId 없으면 기본값(2: 강한영어수학학원) 할당
+  data.staff.forEach(s => {
+    if (!s.businessId) s.businessId = 2;
+  });
+  // 기존 비율제 강사에 businessId 없으면 기본값 할당
+  data.commissionInstructors.forEach(i => {
+    if (!i.businessId) i.businessId = 2;
+  });
+
+  return data;
+}
+
+// 데이터 로드 (Firebase에서)
 function loadData() {
+  // 먼저 로컬 캐시에서 로드 (빠른 초기 로딩)
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
-    const data = JSON.parse(saved);
-    // 기존 데이터에 새 필드가 없으면 추가
-    if (!data.commissionInstructors) data.commissionInstructors = [];
-    if (!data.commissionStudents) data.commissionStudents = [];
-    if (!data.settings.cardFeeRate) data.settings.cardFeeRate = 0.01;
-
-    // 사업장 데이터 호환성 처리
-    if (!data.businesses) {
-      data.businesses = [
-        { id: 1, name: '강한코칭학원' },
-        { id: 2, name: '강한영어수학학원' }
-      ];
-    }
-    // 기존 직원에 businessId 없으면 기본값(2: 강한영어수학학원) 할당
-    data.staff.forEach(s => {
-      if (!s.businessId) s.businessId = 2;
-    });
-    // 기존 비율제 강사에 businessId 없으면 기본값 할당
-    data.commissionInstructors.forEach(i => {
-      if (!i.businessId) i.businessId = 2;
-    });
-
-    return data;
+    return ensureDataCompatibility(JSON.parse(saved));
   }
   return getDefaultData();
 }
 
-// 데이터 저장
+// 데이터 저장 (Firebase + localStorage)
 function saveData(data) {
+  // 로컬 캐시에 저장 (빠른 응답)
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+
+  // Firebase에 저장 (서버 동기화)
+  console.log('Firebase에 저장 시도...', new Date().toLocaleTimeString());
+  dataRef.set(data).then(() => {
+    console.log('Firebase 저장 성공!', new Date().toLocaleTimeString());
+  }).catch(err => {
+    console.error('Firebase 저장 실패:', err);
+    showToast('데이터 동기화 실패. 인터넷 연결을 확인해주세요.');
+  });
 }
+
+// Firebase 실시간 동기화 설정
+function setupFirebaseSync() {
+  console.log('Firebase 실시간 동기화 설정 중...');
+
+  dataRef.on('value', (snapshot) => {
+    console.log('Firebase에서 데이터 수신!', new Date().toLocaleTimeString());
+    const firebaseData = snapshot.val();
+    if (firebaseData) {
+      const compatibleData = ensureDataCompatibility(firebaseData);
+      // 로컬 캐시 업데이트
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(compatibleData));
+      // 전역 데이터 업데이트
+      appData = compatibleData;
+      console.log('workLogs 개수:', appData.workLogs ? appData.workLogs.length : 0);
+      // 화면 다시 렌더링 (로그인 상태일 때만)
+      if (typeof currentUser !== 'undefined' && currentUser) {
+        renderContent();
+      }
+      // 직원 선택 목록 업데이트
+      if (typeof populateStaffSelect === 'function') {
+        populateStaffSelect();
+      }
+    } else {
+      console.log('Firebase에 데이터 없음, 기본 데이터로 초기화');
+    }
+  }, (error) => {
+    console.error('Firebase 동기화 오류:', error);
+    alert('Firebase 연결 오류: ' + error.message);
+  });
+}
+
+// 초기 데이터 마이그레이션 (localStorage -> Firebase)
+function migrateToFirebase() {
+  console.log('Firebase 마이그레이션 확인 중...');
+  const localData = localStorage.getItem(STORAGE_KEY);
+
+  dataRef.once('value').then((snapshot) => {
+    const firebaseData = snapshot.val();
+    console.log('Firebase 기존 데이터:', firebaseData ? '있음' : '없음');
+    console.log('로컬 데이터:', localData ? '있음' : '없음');
+
+    if (!firebaseData) {
+      // Firebase에 데이터가 없으면
+      if (localData) {
+        // 로컬 데이터 업로드
+        const data = ensureDataCompatibility(JSON.parse(localData));
+        dataRef.set(data).then(() => {
+          console.log('로컬 데이터를 Firebase로 마이그레이션 완료');
+        });
+      } else {
+        // 기본 데이터로 초기화
+        dataRef.set(getDefaultData()).then(() => {
+          console.log('기본 데이터로 Firebase 초기화 완료');
+        });
+      }
+    } else {
+      console.log('Firebase에 이미 데이터 있음, 마이그레이션 불필요');
+    }
+  }).catch(err => {
+    console.error('Firebase 연결 실패:', err);
+    alert('Firebase 연결 실패: ' + err.message + '\n\n보안 규칙을 확인해주세요.');
+  });
+}
+
+// Firebase 동기화 시작
+console.log('=== Firebase 초기화 시작 ===');
+migrateToFirebase();
+setupFirebaseSync();
 
 // ============ 사업장 관리 ============
 
@@ -332,25 +429,8 @@ function importDataFromJSON(file) {
       try {
         const data = JSON.parse(e.target.result);
         if (data.staff && data.settings) {
-          // 새 필드가 없으면 추가
-          if (!data.commissionInstructors) data.commissionInstructors = [];
-          if (!data.commissionStudents) data.commissionStudents = [];
-          if (!data.workLogs) data.workLogs = [];
-          if (!data.settings.cardFeeRate) data.settings.cardFeeRate = 0.01;
-          // 사업장 데이터 호환성 처리
-          if (!data.businesses) {
-            data.businesses = [
-              { id: 1, name: '강한코칭학원' },
-              { id: 2, name: '강한영어수학학원' }
-            ];
-          }
-          data.staff.forEach(s => {
-            if (!s.businessId) s.businessId = 2;
-          });
-          data.commissionInstructors.forEach(i => {
-            if (!i.businessId) i.businessId = 2;
-          });
-          appData = data;
+          const compatibleData = ensureDataCompatibility(data);
+          appData = compatibleData;
           saveData(appData);
           resolve(data);
         } else {
