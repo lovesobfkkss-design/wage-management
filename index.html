@@ -43,7 +43,14 @@
             <option value="">-- 본인 이름 선택 --</option>
           </select>
         </div>
+        <div class="form-group">
+          <label class="form-label">비밀번호</label>
+          <input type="password" id="staffPassword" class="form-input" placeholder="비밀번호 입력 (기본: 0000)" onkeypress="if(event.key==='Enter') loginStaff()">
+        </div>
         <button class="btn btn-accent" style="width:100%" onclick="loginStaff()">출근 기록하기</button>
+        <p style="font-size: 0.75rem; color: var(--text-light); margin-top: 0.5rem; text-align: center;">
+          초기 비밀번호는 0000입니다. 로그인 후 변경하세요.
+        </p>
       </div>
     </div>
   </div>

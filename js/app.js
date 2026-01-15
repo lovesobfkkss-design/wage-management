@@ -47,8 +47,18 @@ function loginStaff() {
     alert('이름을 선택해주세요.');
     return;
   }
+
+  const password = document.getElementById('staffPassword').value;
   const staff = getStaffById(staffId);
+
+  // 비밀번호 검증
+  if (staff.password && staff.password !== password) {
+    alert('비밀번호가 일치하지 않습니다.');
+    return;
+  }
+
   currentUser = { role: 'staff', staffId, staff };
+  document.getElementById('staffPassword').value = ''; // 비밀번호 필드 초기화
   showMainApp();
 }
 
@@ -114,6 +124,7 @@ function renderNavTabs() {
     navTabs.innerHTML = `
       <button class="nav-tab ${currentTab === 'mywork' ? 'active' : ''}" onclick="switchTab('mywork')">내 근무기록</button>
       <button class="nav-tab ${currentTab === 'clockin' ? 'active' : ''}" onclick="switchTab('clockin')">출퇴근 기록</button>
+      <button class="nav-tab ${currentTab === 'changePassword' ? 'active' : ''}" onclick="switchTab('changePassword')">비밀번호 변경</button>
       <button class="nav-tab" onclick="logout()">로그아웃</button>
     `;
     if (currentTab === 'dashboard') currentTab = 'mywork';
@@ -156,6 +167,9 @@ function renderContent() {
       break;
     case 'clockin':
       renderClockIn(main);
+      break;
+    case 'changePassword':
+      renderChangePassword(main);
       break;
   }
 }
@@ -334,6 +348,7 @@ function renderStaffManagement(container) {
                   <td>
                     <div class="actions">
                       <button class="btn btn-outline btn-sm" onclick="openEditStaffModal(${staff.id})">수정</button>
+                      <button class="btn btn-sm" style="background: var(--warning); color: white;" onclick="resetStaffPassword(${staff.id})">비번초기화</button>
                       <button class="btn btn-danger btn-sm" onclick="confirmDeleteStaff(${staff.id})">삭제</button>
                     </div>
                   </td>
@@ -2119,6 +2134,90 @@ function openModal() {
 
 function closeModal() {
   document.getElementById('modalOverlay').classList.remove('active');
+}
+
+// ============ 직원 비밀번호 변경 ============
+function renderChangePassword(container) {
+  const staff = currentUser.staff;
+
+  container.innerHTML = `
+    <div class="card" style="max-width: 400px; margin: 2rem auto;">
+      <h2 style="text-align: center; margin-bottom: 1.5rem; color: var(--primary);">비밀번호 변경</h2>
+
+      <div class="form-group">
+        <label class="form-label">현재 비밀번호</label>
+        <input type="password" id="currentPassword" class="form-input" placeholder="현재 비밀번호 입력">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">새 비밀번호</label>
+        <input type="password" id="newPassword" class="form-input" placeholder="새 비밀번호 입력 (4자리 이상)">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">새 비밀번호 확인</label>
+        <input type="password" id="confirmPassword" class="form-input" placeholder="새 비밀번호 다시 입력" onkeypress="if(event.key==='Enter') changeStaffPassword()">
+      </div>
+
+      <button class="btn btn-primary" style="width: 100%;" onclick="changeStaffPassword()">비밀번호 변경</button>
+
+      <p style="font-size: 0.8rem; color: var(--text-light); margin-top: 1rem; text-align: center;">
+        비밀번호는 4자리 이상으로 설정해주세요.
+      </p>
+    </div>
+  `;
+}
+
+// 관리자용: 직원 비밀번호 초기화
+function resetStaffPassword(staffId) {
+  const staff = getStaffById(staffId);
+  if (!staff) return;
+
+  if (confirm(`${staff.name}님의 비밀번호를 0000으로 초기화하시겠습니까?`)) {
+    staff.password = '0000';
+    saveData(appData);
+    showToast(`${staff.name}님의 비밀번호가 0000으로 초기화되었습니다.`);
+  }
+}
+
+function changeStaffPassword() {
+  const staff = currentUser.staff;
+  const currentPassword = document.getElementById('currentPassword').value;
+  const newPassword = document.getElementById('newPassword').value;
+  const confirmPassword = document.getElementById('confirmPassword').value;
+
+  // 현재 비밀번호 확인
+  if (staff.password !== currentPassword) {
+    alert('현재 비밀번호가 일치하지 않습니다.');
+    return;
+  }
+
+  // 새 비밀번호 유효성 검사
+  if (newPassword.length < 4) {
+    alert('새 비밀번호는 4자리 이상이어야 합니다.');
+    return;
+  }
+
+  // 새 비밀번호 확인
+  if (newPassword !== confirmPassword) {
+    alert('새 비밀번호가 일치하지 않습니다.');
+    return;
+  }
+
+  // 비밀번호 변경
+  const staffData = getStaffById(staff.id);
+  staffData.password = newPassword;
+  saveData(appData);
+
+  // 현재 세션의 staff 객체도 업데이트
+  currentUser.staff.password = newPassword;
+
+  // 입력 필드 초기화
+  document.getElementById('currentPassword').value = '';
+  document.getElementById('newPassword').value = '';
+  document.getElementById('confirmPassword').value = '';
+
+  showToast('비밀번호가 변경되었습니다!');
 }
 
 // ============ 초기화 ============
