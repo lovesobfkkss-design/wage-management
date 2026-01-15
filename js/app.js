@@ -1172,7 +1172,8 @@ function renderPayroll(container) {
                   </td>
                   <td><strong style="color: var(--success);">${formatKRW(ded.netPay)}</strong></td>
                   <td>
-                    <button class="btn btn-outline btn-sm" onclick="showPayslip(${staff.id})">명세서</button>
+                    <button class="btn btn-outline btn-sm" onclick="showPayslip(${staff.id})">보기</button>
+                    <button class="btn btn-primary btn-sm" onclick="generateStaffPayrollPDF(${staff.id}, '${selectedMonth}')">PDF</button>
                   </td>
                 </tr>
               `;
@@ -1221,7 +1222,8 @@ function renderPayroll(container) {
                   </td>
                   <td><strong style="color: var(--success);">${formatKRW(calc.netPay)}</strong></td>
                   <td>
-                    <button class="btn btn-outline btn-sm" onclick="showCommissionPayslip(${instructor.id})">명세서</button>
+                    <button class="btn btn-outline btn-sm" onclick="showCommissionPayslip(${instructor.id})">보기</button>
+                    <button class="btn btn-primary btn-sm" onclick="generateCommissionPDF(${instructor.id}, '${selectedMonth}')">PDF</button>
                   </td>
                 </tr>
               `;
