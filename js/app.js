@@ -8,6 +8,7 @@ let currentTab = 'dashboard';
 let selectedMonth = getMonthKey();
 let selectedRole = 'admin';
 let selectedBusiness = 'all';  // 'all' 또는 businessId
+let showTerminatedStaff = false;  // 퇴사자 표시 토글
 
 // ============ 로그인 관련 ============
 function selectRole(role) {
@@ -26,9 +27,12 @@ function selectRole(role) {
 function populateStaffSelect() {
   const select = document.getElementById('staffSelect');
   select.innerHTML = '<option value="">-- 본인 이름 선택 --</option>';
-  appData.staff.forEach(s => {
-    select.innerHTML += `<option value="${s.id}">${s.name}</option>`;
-  });
+  // 퇴사하지 않은 직원만 로그인 목록에 표시
+  appData.staff
+    .filter(s => !s.terminationDate)
+    .forEach(s => {
+      select.innerHTML += `<option value="${s.id}">${s.name}</option>`;
+    });
 }
 
 function loginAdmin() {
@@ -307,13 +311,28 @@ function renderDashboard(container) {
 // ============ 직원관리 ============
 function renderStaffManagement(container) {
   // 선택된 사업장에 따라 직원 필터링
-  const filteredStaff = getStaffByBusiness(selectedBusiness);
+  const allStaff = getStaffByBusiness(selectedBusiness);
+
+  // 퇴사자 필터링
+  const activeStaff = allStaff.filter(s => !s.terminationDate);
+  const terminatedStaff = allStaff.filter(s => !!s.terminationDate);
+
+  // 표시할 직원 목록 결정
+  const filteredStaff = showTerminatedStaff ? allStaff : activeStaff;
 
   container.innerHTML = `
     <div class="card">
       <div class="card-header">
         <h3 class="card-title">직원 관리</h3>
-        <button class="btn btn-primary" onclick="openAddStaffModal()">+ 직원 추가</button>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+          ${terminatedStaff.length > 0 ? `
+            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text-light); cursor: pointer;">
+              <input type="checkbox" ${showTerminatedStaff ? 'checked' : ''} onchange="toggleTerminatedStaff(this.checked)">
+              퇴사자 포함 (${terminatedStaff.length}명)
+            </label>
+          ` : ''}
+          <button class="btn btn-primary" onclick="openAddStaffModal()">+ 직원 추가</button>
+        </div>
       </div>
       <div class="table-container">
         <table>
@@ -321,14 +340,20 @@ function renderStaffManagement(container) {
             <tr>
               <th>이름</th>
               <th>소속</th>
+              <th>직급</th>
               <th>유형</th>
               <th>시급 정보</th>
+              <th>입사일</th>
               <th>공제 유형</th>
               <th>관리</th>
             </tr>
           </thead>
           <tbody>
             ${filteredStaff.map(staff => {
+              const isTerminated = !!staff.terminationDate;
+              const rowStyle = isTerminated ? 'background: #fafafa; opacity: 0.7;' : '';
+              const nameStyle = isTerminated ? 'text-decoration: line-through; color: var(--text-light);' : '';
+
               let wageInfo = '';
               if (staff.tier1Hours > 0) {
                 wageInfo = `첫 ${staff.tier1Hours}시간: ${formatKRW(staff.tier1Rate)}, 이후: ${formatKRW(staff.tier2Rate)}`;
@@ -338,12 +363,20 @@ function renderStaffManagement(container) {
               const typeName = staff.type === 'assistant' ? '조교' : '강사';
               const deductionType = staff.type === 'assistant' ? '고용보험 0.8%' : '3.3%';
               const businessName = getBusinessName(staff.businessId);
+              const positionDisplay = staff.position || '-';
+              const hireDateDisplay = staff.hireDate || '-';
+
               return `
-                <tr>
-                  <td><strong>${staff.name}</strong></td>
+                <tr style="${rowStyle}">
+                  <td>
+                    <strong style="${nameStyle}">${staff.name}</strong>
+                    ${isTerminated ? '<span class="badge" style="background: #ffebee; color: #c62828; margin-left: 0.5rem; font-size: 0.7rem;">퇴사</span>' : ''}
+                  </td>
                   <td><span class="badge badge-business">${businessName}</span></td>
+                  <td>${positionDisplay}</td>
                   <td><span class="badge ${staff.type === 'assistant' ? 'badge-assistant' : 'badge-instructor'}">${typeName}</span></td>
                   <td style="font-size: 0.8125rem;">${wageInfo}</td>
+                  <td style="font-size: 0.8125rem;">${hireDateDisplay}</td>
                   <td style="font-size: 0.8125rem;">${deductionType}</td>
                   <td>
                     <div class="actions">
@@ -362,6 +395,12 @@ function renderStaffManagement(container) {
   `;
 }
 
+// 퇴사자 표시 토글
+function toggleTerminatedStaff(show) {
+  showTerminatedStaff = show;
+  renderContent();
+}
+
 function getStaffFormHTML(staff = null) {
   const businessOptions = appData.businesses.map(b =>
     `<option value="${b.id}" ${staff?.businessId === b.id ? 'selected' : ''}>${b.name}</option>`
@@ -370,6 +409,10 @@ function getStaffFormHTML(staff = null) {
   // 기본 선택 사업장 결정: 수정 시 기존 값, 추가 시 선택된 사업장 또는 첫번째 사업장
   const defaultBusinessId = staff?.businessId ||
     (selectedBusiness !== 'all' ? selectedBusiness : appData.businesses[0]?.id);
+
+  // 직급 옵션 정의
+  const positionOptions = ['원장', '실장', '주임', '일반'];
+  const isCustomPosition = staff?.position && !positionOptions.includes(staff.position);
 
   return `
     <div class="form-row">
@@ -384,6 +427,33 @@ function getStaffFormHTML(staff = null) {
             `<option value="${b.id}" ${defaultBusinessId === b.id ? 'selected' : ''}>${b.name}</option>`
           ).join('')}
         </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">직급</label>
+        <select id="staffPosition" class="form-select" onchange="toggleCustomPosition(this)">
+          <option value="">선택 안함</option>
+          ${positionOptions.map(p => `
+            <option value="${p}" ${staff?.position === p ? 'selected' : ''}>${p}</option>
+          `).join('')}
+          <option value="custom" ${isCustomPosition ? 'selected' : ''}>기타 (직접입력)</option>
+        </select>
+      </div>
+      <div class="form-group" id="customPositionGroup" style="display: ${isCustomPosition ? 'block' : 'none'};">
+        <label class="form-label">직급 직접입력</label>
+        <input type="text" id="staffPositionCustom" class="form-input" value="${isCustomPosition ? staff.position : ''}" placeholder="직급 입력">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">입사일</label>
+        <input type="date" id="staffHireDate" class="form-input" value="${staff?.hireDate || ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">퇴사일</label>
+        <input type="date" id="staffTerminationDate" class="form-input" value="${staff?.terminationDate || ''}">
+        <small style="color: var(--text-light); font-size: 0.75rem;">퇴사일 입력 시 직원 목록에서 숨겨집니다</small>
       </div>
     </div>
     <div class="form-row">
@@ -427,6 +497,28 @@ function getStaffFormHTML(staff = null) {
   `;
 }
 
+// 직급 '기타' 선택 시 직접입력 필드 토글
+function toggleCustomPosition(select) {
+  const customGroup = document.getElementById('customPositionGroup');
+  if (select.value === 'custom') {
+    customGroup.style.display = 'block';
+  } else {
+    customGroup.style.display = 'none';
+    document.getElementById('staffPositionCustom').value = '';
+  }
+}
+
+// 직급 값 추출 헬퍼 함수
+function getPositionValue() {
+  const positionSelect = document.getElementById('staffPosition').value;
+  if (positionSelect === 'custom') {
+    return document.getElementById('staffPositionCustom').value.trim() || null;
+  } else if (positionSelect === '') {
+    return null;
+  }
+  return positionSelect;
+}
+
 function openAddStaffModal() {
   document.getElementById('modalTitle').textContent = '직원 추가';
   document.getElementById('modalBody').innerHTML = getStaffFormHTML();
@@ -455,6 +547,15 @@ function saveNewStaff() {
     return;
   }
 
+  // 입사일/퇴사일 유효성 검증
+  const hireDate = document.getElementById('staffHireDate').value || null;
+  const terminationDate = document.getElementById('staffTerminationDate').value || null;
+
+  if (hireDate && terminationDate && terminationDate < hireDate) {
+    alert('퇴사일은 입사일 이후여야 합니다.');
+    return;
+  }
+
   addStaff({
     name,
     businessId: parseInt(document.getElementById('staffBusinessId').value),
@@ -463,7 +564,11 @@ function saveNewStaff() {
     tier1Hours: parseInt(document.getElementById('tier1Hours').value) || 0,
     tier1Rate: parseInt(document.getElementById('tier1Rate').value) || 0,
     tier2Rate: parseInt(document.getElementById('tier2Rate').value) || 12000,
-    roundingRule: document.getElementById('roundingRule').value
+    roundingRule: document.getElementById('roundingRule').value,
+    // 새 필드 추가
+    hireDate,
+    terminationDate,
+    position: getPositionValue()
   });
 
   closeModal();
@@ -478,6 +583,15 @@ function saveEditStaff(staffId) {
     return;
   }
 
+  // 입사일/퇴사일 유효성 검증
+  const hireDate = document.getElementById('staffHireDate').value || null;
+  const terminationDate = document.getElementById('staffTerminationDate').value || null;
+
+  if (hireDate && terminationDate && terminationDate < hireDate) {
+    alert('퇴사일은 입사일 이후여야 합니다.');
+    return;
+  }
+
   updateStaff(staffId, {
     name,
     businessId: parseInt(document.getElementById('staffBusinessId').value),
@@ -486,7 +600,11 @@ function saveEditStaff(staffId) {
     tier1Hours: parseInt(document.getElementById('tier1Hours').value) || 0,
     tier1Rate: parseInt(document.getElementById('tier1Rate').value) || 0,
     tier2Rate: parseInt(document.getElementById('tier2Rate').value) || 12000,
-    roundingRule: document.getElementById('roundingRule').value
+    roundingRule: document.getElementById('roundingRule').value,
+    // 새 필드 추가
+    hireDate,
+    terminationDate,
+    position: getPositionValue()
   });
 
   closeModal();
@@ -943,6 +1061,9 @@ function renderWorkLogs(container) {
 
 function getWorkLogFormHTML(log = null) {
   const today = formatDate();
+  // 퇴사하지 않은 직원만 선택 가능 (단, 수정 시 기존 선택 직원은 포함)
+  const activeStaff = appData.staff.filter(s => !s.terminationDate || (log && s.id === log.staffId));
+
   return `
     <div class="form-row">
       <div class="form-group">
@@ -952,7 +1073,7 @@ function getWorkLogFormHTML(log = null) {
       <div class="form-group">
         <label class="form-label">직원 *</label>
         <select id="logStaff" class="form-select">
-          ${appData.staff.map(s => `
+          ${activeStaff.map(s => `
             <option value="${s.id}" ${log?.staffId === s.id ? 'selected' : ''}>${s.name}</option>
           `).join('')}
         </select>

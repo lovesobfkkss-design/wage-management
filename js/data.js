@@ -77,9 +77,13 @@ function ensureDataCompatibility(data) {
 
   // 기존 직원에 businessId 없으면 기본값(2: 강한영어수학학원) 할당
   // 기존 직원에 password 없으면 기본값 '0000' 할당
+  // 기존 직원에 새 필드(hireDate, terminationDate, position) 없으면 null 할당
   data.staff.forEach(s => {
     if (!s.businessId) s.businessId = 2;
     if (!s.password) s.password = '0000';
+    if (s.hireDate === undefined) s.hireDate = null;
+    if (s.terminationDate === undefined) s.terminationDate = null;
+    if (s.position === undefined) s.position = null;
   });
   // 기존 비율제 강사에 businessId 없으면 기본값 할당
   data.commissionInstructors.forEach(i => {
