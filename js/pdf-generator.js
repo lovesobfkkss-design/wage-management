@@ -1,0 +1,568 @@
+/* ============================================
+   급여 명세서 PDF 출력 모듈
+   SPEC-PDF-001
+   html2canvas + jsPDF 방식 (한글 지원)
+   ============================================ */
+
+// jsPDF 초기화
+const { jsPDF } = window.jspdf;
+
+const KOREAN_FONT_NAME = 'NotoSansKR';
+const KOREAN_FONT_VFS = 'NotoSansKR-Regular.ttf';
+const KOREAN_FONT_URL =
+  'https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/TTF/Korean/NotoSansKR-Regular.ttf';
+
+let cachedKoreanFontBase64 = null;
+let koreanFontReady = false;
+
+function formatDateKorean(date) {
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let result = '';
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    result += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(result);
+}
+
+async function ensureKoreanFont(pdf) {
+  if (koreanFontReady) {
+    return true;
+  }
+
+  try {
+    if (!cachedKoreanFontBase64) {
+      const response = await fetch(KOREAN_FONT_URL);
+      if (!response.ok) {
+        throw new Error(`Font fetch failed: ${response.status}`);
+      }
+      const buffer = await response.arrayBuffer();
+      cachedKoreanFontBase64 = arrayBufferToBase64(buffer);
+    }
+
+    pdf.addFileToVFS(KOREAN_FONT_VFS, cachedKoreanFontBase64);
+    pdf.addFont(KOREAN_FONT_VFS, KOREAN_FONT_NAME, 'normal');
+    koreanFontReady = true;
+    return true;
+  } catch (error) {
+    console.warn('Korean font load failed. Falling back to image PDF.', error);
+    return false;
+  }
+}
+
+function drawSectionTitle(pdf, title, y, margin) {
+  pdf.setFontSize(11);
+  pdf.text(title, margin, y);
+  return y + 6;
+}
+
+function drawTextLine(pdf, text, y, margin, size = 10) {
+  pdf.setFontSize(size);
+  pdf.text(text, margin, y);
+  return y + 6;
+}
+
+function drawKeyValue(pdf, key, value, y, margin, pageWidth, size = 10) {
+  pdf.setFontSize(size);
+  pdf.text(key, margin, y);
+  pdf.text(value, pageWidth - margin, y, { align: 'right' });
+  return y + 6;
+}
+
+function drawDivider(pdf, y, margin, pageWidth, color = '#333333') {
+  pdf.setDrawColor(color);
+  pdf.setLineWidth(0.3);
+  pdf.line(margin, y, pageWidth - margin, y);
+  return y + 6;
+}
+
+/**
+ * 급여명세서 HTML 생성 (시급제 직원용)
+ */
+function createStaffPayslipHTML(staff, monthKey, logs, wage, ded) {
+  const { year, month } = parseMonthKey(monthKey);
+  const businessName = getBusinessName(staff.businessId);
+  const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
+  const typeName = staff.type === 'assistant' ? '조교' : '파트강사';
+  const deductionRate = staff.type === 'assistant' ? '0.8%' : '3.3%';
+  const today = new Date();
+  const todayStr = formatDateKorean(today);
+
+  return `
+    <div id="pdfContent" style="
+      width: 595px;
+      padding: 40px;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: white;
+      color: #1a1a1a;
+      line-height: 1.6;
+    ">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="font-size: 24px; margin: 0 0 8px 0;">${businessName}</h1>
+        <h2 style="font-size: 18px; font-weight: 500; margin: 0; color: #666;">급여 명세서</h2>
+      </div>
+
+      <div style="font-size: 13px; margin-bottom: 20px;">
+        <p style="margin: 4px 0;">발급일: ${todayStr}</p>
+        <p style="margin: 4px 0;">정산월: ${year}년 ${month}월</p>
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[직원 정보]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">이름: ${staff.name}</p>
+        <p style="margin: 4px 0; font-size: 13px;">직급: ${typeName}</p>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[근무 내역]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">총 근무시간: ${totalHours.toFixed(2)} 시간</p>
+        <p style="margin: 4px 0; font-size: 13px;">시급: ${formatKRW(staff.hourlyRate)} 원</p>
+        ${staff.tier1Hours > 0 ? `
+          <p style="margin: 4px 0; font-size: 13px; padding-left: 10px;">- 1구간 (${staff.tier1Hours}시간): ${formatKRW(staff.tier1Rate)} 원/시간</p>
+          <p style="margin: 4px 0; font-size: 13px; padding-left: 10px;">- 2구간: ${formatKRW(staff.tier2Rate)} 원/시간</p>
+        ` : ''}
+        <p style="margin: 4px 0; font-size: 13px;">세전급여: ${formatKRW(Math.round(wage.grossPay))} 원</p>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[공제 내역]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">공제 유형: ${ded.typeName}</p>
+        <p style="margin: 4px 0; font-size: 13px;">공제율: ${deductionRate}</p>
+        <p style="margin: 4px 0; font-size: 13px;">공제액: ${formatKRW(Math.round(ded.deduction))} 원</p>
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
+
+      <div style="margin-bottom: 30px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[정산 요약]</h3>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
+          <span>세전급여:</span>
+          <span>${formatKRW(Math.round(wage.grossPay))} 원</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
+          <span>공제액:</span>
+          <span>- ${formatKRW(Math.round(ded.deduction))} 원</span>
+        </div>
+        <hr style="border: none; border-top: 1px solid #ccc; margin: 10px 0; width: 200px;">
+        <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: bold; margin: 4px 0;">
+          <span>실지급액:</span>
+          <span>${formatKRW(Math.round(ded.netPay))} 원</span>
+        </div>
+      </div>
+
+      <div style="text-align: right; font-size: 13px; margin-top: 40px;">
+        발급인: ________________
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * 급여명세서 HTML 생성 (비율제 강사용)
+ */
+function createCommissionPayslipHTML(instructor, monthKey, students, calc) {
+  const { year, month } = parseMonthKey(monthKey);
+  const businessName = getBusinessName(instructor.businessId);
+  const today = new Date();
+  const todayStr = formatDateKorean(today);
+
+  return `
+    <div id="pdfContent" style="
+      width: 595px;
+      padding: 40px;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: white;
+      color: #1a1a1a;
+      line-height: 1.6;
+    ">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="font-size: 24px; margin: 0 0 8px 0;">${businessName}</h1>
+        <h2 style="font-size: 18px; font-weight: 500; margin: 0; color: #666;">비율제 강사 정산 명세서</h2>
+      </div>
+
+      <div style="font-size: 13px; margin-bottom: 20px;">
+        <p style="margin: 4px 0;">발급일: ${todayStr}</p>
+        <p style="margin: 4px 0;">정산월: ${year}년 ${month}월</p>
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[강사 정보]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">이름: ${instructor.name}</p>
+        <p style="margin: 4px 0; font-size: 13px;">정산비율: ${instructor.commissionRate * 100}%</p>
+        <p style="margin: 4px 0; font-size: 13px;">담당학생: ${students.length}명</p>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[정산 기준]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">총 수강료: ${formatKRW(calc.totalTuition)} 원</p>
+        <p style="margin: 4px 0; font-size: 13px;">카드수수료 (1%): - ${formatKRW(Math.round(calc.cardFee))} 원</p>
+        <p style="margin: 4px 0; font-size: 13px;">수수료공제 후: ${formatKRW(Math.round(calc.afterCardFee))} 원</p>
+        <p style="margin: 4px 0; font-size: 13px;">강사 정산액 (${instructor.commissionRate * 100}%): ${formatKRW(Math.round(calc.instructorGross))} 원</p>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[공제 내역]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">사업소득세 (3.3%): - ${formatKRW(Math.round(calc.incomeTax))} 원</p>
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
+
+      <div style="margin-bottom: 30px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[최종 정산]</h3>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
+          <span>세전정산액:</span>
+          <span>${formatKRW(Math.round(calc.instructorGross))} 원</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
+          <span>공제액:</span>
+          <span>- ${formatKRW(Math.round(calc.totalDeduction))} 원</span>
+        </div>
+        <hr style="border: none; border-top: 1px solid #ccc; margin: 10px 0; width: 200px;">
+        <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: bold; margin: 4px 0;">
+          <span>실지급액:</span>
+          <span>${formatKRW(Math.round(calc.netPay))} 원</span>
+        </div>
+      </div>
+
+      <div style="text-align: right; font-size: 13px; margin-top: 40px;">
+        발급인: ________________
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * HTML을 PDF로 변환
+ */
+async function htmlToPDF(html, fileName) {
+  // 임시 컨테이너 생성
+  const container = document.createElement('div');
+  container.style.position = 'absolute';
+  container.style.left = '-9999px';
+  container.style.top = '0';
+  container.innerHTML = html;
+  document.body.appendChild(container);
+
+  const element = container.querySelector('#pdfContent');
+
+  try {
+    // html2canvas로 캡처
+    const canvas = await html2canvas(element, {
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      backgroundColor: '#ffffff'
+    });
+
+    // PDF 생성
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+    const imgWidth = canvas.width;
+    const imgHeight = canvas.height;
+    const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
+    const imgX = (pdfWidth - imgWidth * ratio) / 2;
+    const imgY = 0;
+
+    pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
+    pdf.save(fileName);
+
+    showToast('PDF가 다운로드되었습니다.');
+  } catch (error) {
+    console.error('PDF 생성 오류:', error);
+    showToast('PDF 생성 중 오류가 발생했습니다.');
+  } finally {
+    // 임시 컨테이너 제거
+    document.body.removeChild(container);
+  }
+}
+
+function drawStaffPayslipPDF(pdf, staff, monthKey, logs, wage, ded) {
+  const { year, month } = parseMonthKey(monthKey);
+  const businessName = getBusinessName(staff.businessId);
+  const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
+  const typeName = staff.type === 'assistant' ? '조교' : '파트강사';
+  const deductionRate = staff.type === 'assistant' ? '0.8%' : '3.3%';
+  const todayStr = formatDateKorean(new Date());
+
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const margin = 15;
+  let y = 18;
+
+  pdf.setFont(KOREAN_FONT_NAME, 'normal');
+  pdf.setTextColor('#1a1a1a');
+
+  pdf.setFontSize(18);
+  const titleLines = pdf.splitTextToSize(businessName, pageWidth - margin * 2);
+  pdf.text(titleLines, pageWidth / 2, y, { align: 'center' });
+  y += titleLines.length * 8;
+
+  pdf.setFontSize(12);
+  pdf.text('급여 명세서', pageWidth / 2, y, { align: 'center' });
+  y += 8;
+
+  pdf.setFontSize(10);
+  pdf.text(`발급일: ${todayStr}`, margin, y);
+  y += 6;
+  pdf.text(`정산월: ${year}년 ${month}월`, margin, y);
+  y += 6;
+
+  y = drawDivider(pdf, y + 2, margin, pageWidth);
+
+  y = drawSectionTitle(pdf, '[직원 정보]', y, margin);
+  y = drawTextLine(pdf, `이름: ${staff.name}`, y, margin);
+  y = drawTextLine(pdf, `직급: ${typeName}`, y, margin);
+  y += 4;
+
+  y = drawSectionTitle(pdf, '[근무 내역]', y, margin);
+  y = drawTextLine(pdf, `총 근무시간: ${totalHours.toFixed(2)} 시간`, y, margin);
+  y = drawTextLine(pdf, `시급: ${formatKRW(staff.hourlyRate)} 원`, y, margin);
+  if (staff.tier1Hours > 0) {
+    y = drawTextLine(
+      pdf,
+      `- 1구간 (${staff.tier1Hours}시간): ${formatKRW(staff.tier1Rate)} 원/시간`,
+      y,
+      margin
+    );
+    y = drawTextLine(
+      pdf,
+      `- 2구간: ${formatKRW(staff.tier2Rate)} 원/시간`,
+      y,
+      margin
+    );
+  }
+  y = drawTextLine(pdf, `세전급여: ${formatKRW(Math.round(wage.grossPay))} 원`, y, margin);
+  y += 4;
+
+  y = drawSectionTitle(pdf, '[공제 내역]', y, margin);
+  y = drawTextLine(pdf, `공제 유형: ${ded.typeName}`, y, margin);
+  y = drawTextLine(pdf, `공제율: ${deductionRate}`, y, margin);
+  y = drawTextLine(pdf, `공제액: ${formatKRW(Math.round(ded.deduction))} 원`, y, margin);
+  y += 4;
+
+  y = drawDivider(pdf, y + 2, margin, pageWidth);
+
+  y = drawSectionTitle(pdf, '[정산 요약]', y, margin);
+  y = drawKeyValue(
+    pdf,
+    '세전급여:',
+    `${formatKRW(Math.round(wage.grossPay))} 원`,
+    y,
+    margin,
+    pageWidth
+  );
+  y = drawKeyValue(
+    pdf,
+    '공제액:',
+    `- ${formatKRW(Math.round(ded.deduction))} 원`,
+    y,
+    margin,
+    pageWidth
+  );
+  y = drawDivider(pdf, y + 1, margin, pageWidth, '#cccccc');
+  pdf.setFontSize(12);
+  pdf.text('실지급액:', margin, y);
+  pdf.text(`${formatKRW(Math.round(ded.netPay))} 원`, pageWidth - margin, y, {
+    align: 'right'
+  });
+  y += 12;
+
+  pdf.setFontSize(10);
+  pdf.text('발급인: ________________', pageWidth - margin, y, { align: 'right' });
+}
+
+function drawCommissionPayslipPDF(pdf, instructor, monthKey, students, calc) {
+  const { year, month } = parseMonthKey(monthKey);
+  const businessName = getBusinessName(instructor.businessId);
+  const todayStr = formatDateKorean(new Date());
+
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const margin = 15;
+  let y = 18;
+
+  pdf.setFont(KOREAN_FONT_NAME, 'normal');
+  pdf.setTextColor('#1a1a1a');
+
+  pdf.setFontSize(18);
+  const titleLines = pdf.splitTextToSize(businessName, pageWidth - margin * 2);
+  pdf.text(titleLines, pageWidth / 2, y, { align: 'center' });
+  y += titleLines.length * 8;
+
+  pdf.setFontSize(12);
+  pdf.text('비율제 강사 정산 명세서', pageWidth / 2, y, { align: 'center' });
+  y += 8;
+
+  pdf.setFontSize(10);
+  pdf.text(`발급일: ${todayStr}`, margin, y);
+  y += 6;
+  pdf.text(`정산월: ${year}년 ${month}월`, margin, y);
+  y += 6;
+
+  y = drawDivider(pdf, y + 2, margin, pageWidth);
+
+  y = drawSectionTitle(pdf, '[강사 정보]', y, margin);
+  y = drawTextLine(pdf, `이름: ${instructor.name}`, y, margin);
+  y = drawTextLine(pdf, `정산비율: ${instructor.commissionRate * 100}%`, y, margin);
+  y = drawTextLine(pdf, `담당학생: ${students.length}명`, y, margin);
+  y += 4;
+
+  y = drawSectionTitle(pdf, '[정산 기준]', y, margin);
+  y = drawTextLine(pdf, `총 수강료: ${formatKRW(calc.totalTuition)} 원`, y, margin);
+  y = drawTextLine(
+    pdf,
+    `카드수수료 (1%): - ${formatKRW(Math.round(calc.cardFee))} 원`,
+    y,
+    margin
+  );
+  y = drawTextLine(
+    pdf,
+    `수수료공제 후: ${formatKRW(Math.round(calc.afterCardFee))} 원`,
+    y,
+    margin
+  );
+  y = drawTextLine(
+    pdf,
+    `강사 정산액 (${instructor.commissionRate * 100}%): ${formatKRW(Math.round(calc.instructorGross))} 원`,
+    y,
+    margin
+  );
+  y += 4;
+
+  y = drawSectionTitle(pdf, '[공제 내역]', y, margin);
+  y = drawTextLine(
+    pdf,
+    `사업소득세 (3.3%): - ${formatKRW(Math.round(calc.incomeTax))} 원`,
+    y,
+    margin
+  );
+  y += 4;
+
+  y = drawDivider(pdf, y + 2, margin, pageWidth);
+
+  y = drawSectionTitle(pdf, '[최종 정산]', y, margin);
+  y = drawKeyValue(
+    pdf,
+    '세전정산액:',
+    `${formatKRW(Math.round(calc.instructorGross))} 원`,
+    y,
+    margin,
+    pageWidth
+  );
+  y = drawKeyValue(
+    pdf,
+    '공제액:',
+    `- ${formatKRW(Math.round(calc.totalDeduction))} 원`,
+    y,
+    margin,
+    pageWidth
+  );
+  y = drawDivider(pdf, y + 1, margin, pageWidth, '#cccccc');
+  pdf.setFontSize(12);
+  pdf.text('실지급액:', margin, y);
+  pdf.text(`${formatKRW(Math.round(calc.netPay))} 원`, pageWidth - margin, y, {
+    align: 'right'
+  });
+  y += 12;
+
+  pdf.setFontSize(10);
+  pdf.text('발급인: ________________', pageWidth - margin, y, { align: 'right' });
+}
+
+/**
+ * 시급제 직원 급여 명세서 PDF 생성
+ * @param {number} staffId - 직원 ID
+ * @param {string} monthKey - 월 키 (YYYY-MM)
+ */
+async function generateStaffPayrollPDF(staffId, monthKey) {
+  const staff = getStaffById(staffId);
+  if (!staff) {
+    showToast('직원 정보를 찾을 수 없습니다.');
+    return;
+  }
+
+  const logs = getStaffWorkLogs(staffId, monthKey);
+  const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
+
+  if (totalHours === 0) {
+    showToast('해당 월의 근무 기록이 없습니다.');
+    return;
+  }
+
+  const wage = calculateWage(staff, totalHours);
+  const ded = calculateDeduction(staff, wage.grossPay, appData.settings);
+  const { year, month } = parseMonthKey(monthKey);
+
+  const fileName = `급여명세서_${staff.name}_${year}년${month}월.pdf`;
+
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const fontReady = await ensureKoreanFont(pdf);
+  if (!fontReady) {
+    const html = createStaffPayslipHTML(staff, monthKey, logs, wage, ded);
+    htmlToPDF(html, fileName);
+    return;
+  }
+
+  drawStaffPayslipPDF(pdf, staff, monthKey, logs, wage, ded);
+  pdf.save(fileName);
+  showToast('PDF가 다운로드되었습니다.');
+}
+
+/**
+ * 비율제 강사 정산 명세서 PDF 생성
+ * @param {number} instructorId - 강사 ID
+ * @param {string} monthKey - 월 키 (YYYY-MM)
+ */
+async function generateCommissionPDF(instructorId, monthKey) {
+  const instructor = getCommissionInstructorById(instructorId);
+  if (!instructor) {
+    showToast('강사 정보를 찾을 수 없습니다.');
+    return;
+  }
+
+  const students = getCommissionStudents(instructorId, monthKey);
+  if (students.length === 0) {
+    showToast('해당 월의 정산 대상이 없습니다.');
+    return;
+  }
+
+  const calc = calculateCommission(instructor, students, appData.settings);
+  const { year, month } = parseMonthKey(monthKey);
+
+  const fileName = `급여명세서_${instructor.name}_${year}년${month}월.pdf`;
+
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const fontReady = await ensureKoreanFont(pdf);
+  if (!fontReady) {
+    const html = createCommissionPayslipHTML(instructor, monthKey, students, calc);
+    htmlToPDF(html, fileName);
+    return;
+  }
+
+  drawCommissionPayslipPDF(pdf, instructor, monthKey, students, calc);
+  pdf.save(fileName);
+  showToast('PDF가 다운로드되었습니다.');
+}

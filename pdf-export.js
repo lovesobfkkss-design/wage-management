@@ -1,5 +1,5 @@
 /*
-  Legacy PDF export entrypoint kept for backward compatibility.
+  Legacy PDF export entrypoint for old cached HTML.
   Uses html2canvas + jsPDF image export to avoid custom font issues.
 */
 (function () {
