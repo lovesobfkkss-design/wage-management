@@ -168,6 +168,19 @@
     `;
   }
 
+  function loadHtml2Canvas() {
+    if (window.html2canvas) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error('html2canvas load failed'));
+      document.head.appendChild(script);
+    });
+  }
+
   async function htmlToPDF(html, fileName) {
     const container = document.createElement('div');
     container.style.position = 'absolute';
@@ -179,6 +192,9 @@
     const element = container.querySelector('#pdfContent');
 
     try {
+      if (!window.html2canvas) {
+        await loadHtml2Canvas();
+      }
       const canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
