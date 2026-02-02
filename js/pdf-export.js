@@ -38,6 +38,10 @@ function generateStaffPayrollPDF(staffId, monthKey) {
     format: 'a4'
   });
 
+  // 한글 폰트 등록
+  addNanumGothicFont(doc);
+  doc.setFont('NanumGothic', 'normal');
+
   const pageWidth = doc.internal.pageSize.getWidth();
   const marginLeft = 20;
   const marginRight = 20;
@@ -46,7 +50,6 @@ function generateStaffPayrollPDF(staffId, monthKey) {
 
   // 헤더
   doc.setFontSize(18);
-  doc.setFont('helvetica', 'bold');
   doc.text(businessName, pageWidth / 2, yPos, { align: 'center' });
   yPos += 10;
 
@@ -56,7 +59,7 @@ function generateStaffPayrollPDF(staffId, monthKey) {
 
   // 발급일/정산월
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NanumGothic', 'normal');
   const today = new Date();
   doc.text(`발급일: ${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일`, marginLeft, yPos);
   yPos += 6;
@@ -70,11 +73,11 @@ function generateStaffPayrollPDF(staffId, monthKey) {
 
   // 직원 정보 섹션
   doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('NanumGothic', 'normal');
   doc.text('[직원 정보]', marginLeft, yPos);
   yPos += 8;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NanumGothic', 'normal');
   doc.text(`이름: ${staff.name}`, marginLeft, yPos);
   yPos += 6;
   const typeName = staff.type === 'assistant' ? '조교' : '파트강사';
@@ -82,11 +85,11 @@ function generateStaffPayrollPDF(staffId, monthKey) {
   yPos += 12;
 
   // 근무 내역 섹션
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('NanumGothic', 'normal');
   doc.text('[근무 내역]', marginLeft, yPos);
   yPos += 8;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NanumGothic', 'normal');
   doc.text(`총 근무시간: ${totalHours.toFixed(2)} 시간`, marginLeft, yPos);
   yPos += 6;
   doc.text(`시급: ${formatKRW(staff.hourlyRate)} 원`, marginLeft, yPos);
@@ -104,11 +107,11 @@ function generateStaffPayrollPDF(staffId, monthKey) {
   yPos += 12;
 
   // 공제 내역 섹션
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('NanumGothic', 'normal');
   doc.text('[공제 내역]', marginLeft, yPos);
   yPos += 8;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NanumGothic', 'normal');
   doc.text(`공제 유형: ${ded.typeName}`, marginLeft, yPos);
   yPos += 6;
   const deductionRate = staff.type === 'assistant' ? '0.8%' : '3.3%';
@@ -122,11 +125,11 @@ function generateStaffPayrollPDF(staffId, monthKey) {
   yPos += 10;
 
   // 정산 요약 섹션
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('NanumGothic', 'normal');
   doc.text('[정산 요약]', marginLeft, yPos);
   yPos += 8;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NanumGothic', 'normal');
   doc.text(`세전급여:`, marginLeft, yPos);
   doc.text(`${formatKRW(Math.round(wage.grossPay))} 원`, marginLeft + 80, yPos, { align: 'right' });
   yPos += 6;
@@ -138,7 +141,7 @@ function generateStaffPayrollPDF(staffId, monthKey) {
   doc.line(marginLeft, yPos, marginLeft + 90, yPos);
   yPos += 8;
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('NanumGothic', 'normal');
   doc.setFontSize(12);
   doc.text(`실지급액:`, marginLeft, yPos);
   doc.text(`${formatKRW(Math.round(ded.netPay))} 원`, marginLeft + 80, yPos, { align: 'right' });
@@ -146,7 +149,7 @@ function generateStaffPayrollPDF(staffId, monthKey) {
 
   // 서명란
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NanumGothic', 'normal');
   doc.text('발급인: ________________', pageWidth - marginRight - 60, yPos);
 
   // 파일 저장
@@ -185,6 +188,10 @@ function generateCommissionPDF(instructorId, monthKey) {
     format: 'a4'
   });
 
+  // 한글 폰트 등록
+  addNanumGothicFont(doc);
+  doc.setFont('NanumGothic', 'normal');
+
   const pageWidth = doc.internal.pageSize.getWidth();
   const marginLeft = 20;
   const marginRight = 20;
@@ -192,7 +199,6 @@ function generateCommissionPDF(instructorId, monthKey) {
 
   // 헤더
   doc.setFontSize(18);
-  doc.setFont('helvetica', 'bold');
   doc.text(businessName, pageWidth / 2, yPos, { align: 'center' });
   yPos += 10;
 
@@ -202,7 +208,7 @@ function generateCommissionPDF(instructorId, monthKey) {
 
   // 발급일/정산월
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NanumGothic', 'normal');
   const today = new Date();
   doc.text(`발급일: ${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일`, marginLeft, yPos);
   yPos += 6;
@@ -216,11 +222,11 @@ function generateCommissionPDF(instructorId, monthKey) {
 
   // 강사 정보 섹션
   doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('NanumGothic', 'normal');
   doc.text('[강사 정보]', marginLeft, yPos);
   yPos += 8;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NanumGothic', 'normal');
   doc.text(`이름: ${instructor.name}`, marginLeft, yPos);
   yPos += 6;
   doc.text(`정산비율: ${instructor.commissionRate * 100}%`, marginLeft, yPos);
@@ -229,11 +235,11 @@ function generateCommissionPDF(instructorId, monthKey) {
   yPos += 12;
 
   // 정산 기준 섹션
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('NanumGothic', 'normal');
   doc.text('[정산 기준]', marginLeft, yPos);
   yPos += 8;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NanumGothic', 'normal');
   doc.text(`총 수강료: ${formatKRW(calc.totalTuition)} 원`, marginLeft, yPos);
   yPos += 6;
   doc.text(`카드수수료 (1%): - ${formatKRW(Math.round(calc.cardFee))} 원`, marginLeft, yPos);
@@ -244,11 +250,11 @@ function generateCommissionPDF(instructorId, monthKey) {
   yPos += 12;
 
   // 공제 내역 섹션
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('NanumGothic', 'normal');
   doc.text('[공제 내역]', marginLeft, yPos);
   yPos += 8;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NanumGothic', 'normal');
   doc.text(`사업소득세 (3.3%): - ${formatKRW(Math.round(calc.incomeTax))} 원`, marginLeft, yPos);
   yPos += 12;
 
@@ -257,11 +263,11 @@ function generateCommissionPDF(instructorId, monthKey) {
   yPos += 10;
 
   // 최종 정산 섹션
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('NanumGothic', 'normal');
   doc.text('[최종 정산]', marginLeft, yPos);
   yPos += 8;
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NanumGothic', 'normal');
   doc.text(`세전정산액:`, marginLeft, yPos);
   doc.text(`${formatKRW(Math.round(calc.instructorGross))} 원`, marginLeft + 80, yPos, { align: 'right' });
   yPos += 6;
@@ -273,7 +279,7 @@ function generateCommissionPDF(instructorId, monthKey) {
   doc.line(marginLeft, yPos, marginLeft + 90, yPos);
   yPos += 8;
 
-  doc.setFont('helvetica', 'bold');
+  doc.setFont('NanumGothic', 'normal');
   doc.setFontSize(12);
   doc.text(`실지급액:`, marginLeft, yPos);
   doc.text(`${formatKRW(Math.round(calc.netPay))} 원`, marginLeft + 80, yPos, { align: 'right' });
@@ -281,7 +287,7 @@ function generateCommissionPDF(instructorId, monthKey) {
 
   // 서명란
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NanumGothic', 'normal');
   doc.text('발급인: ________________', pageWidth - marginRight - 60, yPos);
 
   // 파일 저장
