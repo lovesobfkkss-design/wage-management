@@ -2783,10 +2783,41 @@ function openSpecialLectureStudentManagement(lectureId) {
         <div style="display: flex; gap: 0.5rem;">
           <label class="btn btn-success btn-sm" style="cursor: pointer;">
             Excel 업로드
-            <input type="file" accept=".csv,.txt" style="display: none;" onchange="handleSpecialLectureExcelUpload(this, ${lectureId})">
+            <input type="file" accept=".xlsx,.xls,.csv,.txt" style="display: none;" onchange="handleSpecialLectureExcelUpload(this, ${lectureId})">
           </label>
           <button class="btn btn-primary btn-sm" onclick="openAddSpecialLectureStudentModal(${lectureId})">+ 학생 추가</button>
         </div>
+      </div>
+
+      <!-- 텍스트 붙여넣기 입력 -->
+      <div style="background: var(--bg); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+        <label style="font-size: 0.875rem; font-weight: 600; display: block; margin-bottom: 0.5rem;">📋 텍스트 붙여넣기</label>
+        <textarea id="pasteStudentText_${lectureId}" class="form-input" rows="4" placeholder="이름    금액
+최효준    280000
+장근혁    350000
+이유찬    250000" style="width: 100%; font-family: monospace; font-size: 0.875rem;"></textarea>
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem; align-items: center;">
+          <button class="btn btn-primary" onclick="addStudentsFromText(${lectureId})">텍스트로 추가</button>
+          <span style="font-size: 0.75rem; color: var(--text-light);">형식: 이름(탭 또는 공백)금액 - 한 줄에 한 명</span>
+        </div>
+      </div>
+
+      <!-- 학생 수 빠른 입력 -->
+      <div style="background: var(--bg); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+        <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 150px;">
+            <label style="font-size: 0.875rem; font-weight: 600; display: block; margin-bottom: 0.25rem;">학생 수 빠른 등록</label>
+            <input type="number" id="quickStudentCount_${lectureId}" class="form-input" placeholder="예: 10" min="1" max="100" style="width: 100%;">
+          </div>
+          <div style="flex: 1; min-width: 150px;">
+            <label style="font-size: 0.875rem; font-weight: 600; display: block; margin-bottom: 0.25rem;">1인당 수강료</label>
+            <input type="number" id="quickStudentTuition_${lectureId}" class="form-input" value="${lecture.tuitionPerStudent || 0}" min="0" step="10000" style="width: 100%;">
+          </div>
+          <button class="btn btn-accent" onclick="addQuickStudents(${lectureId})">추가</button>
+        </div>
+        <p style="font-size: 0.75rem; color: var(--text-light); margin-top: 0.5rem;">
+          학생 수만 입력하면 "학생1, 학생2..." 형태로 자동 등록됩니다.
+        </p>
       </div>
 
       ${calc ? `
@@ -2835,6 +2866,124 @@ function openSpecialLectureStudentManagement(lectureId) {
   `;
 
   document.getElementById('specialLectureStudentSection').innerHTML = html;
+}
+
+// 학생 수 빠른 등록
+function addQuickStudents(lectureId) {
+  const countInput = document.getElementById(`quickStudentCount_${lectureId}`);
+  const tuitionInput = document.getElementById(`quickStudentTuition_${lectureId}`);
+
+  const count = parseInt(countInput.value) || 0;
+  const tuition = parseInt(tuitionInput.value) || 0;
+
+  if (count <= 0) {
+    alert('학생 수를 입력해주세요.');
+    return;
+  }
+
+  if (tuition <= 0) {
+    alert('1인당 수강료를 입력해주세요.');
+    return;
+  }
+
+  const existingStudents = getSpecialLectureStudents(lectureId, selectedMonth);
+  const nextId = existingStudents.length > 0
+    ? Math.max(...existingStudents.map(s => s.id || 0)) + 1
+    : 1;
+
+  const newStudents = [];
+  for (let i = 0; i < count; i++) {
+    newStudents.push({
+      id: nextId + i,
+      name: `학생${existingStudents.length + i + 1}`,
+      tuition: tuition
+    });
+  }
+
+  const allStudents = [...existingStudents, ...newStudents];
+  setSpecialLectureStudents(lectureId, selectedMonth, allStudents);
+
+  countInput.value = '';
+  renderContent();
+  openSpecialLectureStudentManagement(lectureId);
+  showToast(`${count}명의 학생이 추가되었습니다. (총 ${formatKRW(count * tuition)})`);
+}
+
+// 텍스트 붙여넣기로 학생 추가
+function addStudentsFromText(lectureId) {
+  const textarea = document.getElementById(`pasteStudentText_${lectureId}`);
+  const text = textarea.value.trim();
+
+  if (!text) {
+    alert('텍스트를 입력해주세요.');
+    return;
+  }
+
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  const students = [];
+
+  for (const line of lines) {
+    // 탭, 여러 공백, 쉼표로 분리
+    const parts = line.trim().split(/[\t,]+|\s{2,}/);
+
+    if (parts.length === 0) continue;
+
+    // 첫 부분이 이름
+    let name = parts[0].trim();
+
+    // 이름에서 숫자만 있는 부분 제거 (금액이 붙어있는 경우 처리)
+    // 예: "최효준    280,000" 또는 "최효준280000"
+
+    // 금액 찾기: 마지막 숫자 패턴
+    let tuition = 0;
+
+    // 나머지 부분에서 숫자 찾기
+    for (let i = 1; i < parts.length; i++) {
+      const numStr = parts[i].replace(/[^\d]/g, '');
+      if (numStr) {
+        tuition = parseInt(numStr) || 0;
+        break;
+      }
+    }
+
+    // 이름과 금액이 공백 하나로만 구분된 경우 처리
+    if (tuition === 0) {
+      const match = line.match(/^(.+?)\s+([\d,]+)\s*$/);
+      if (match) {
+        name = match[1].trim();
+        tuition = parseInt(match[2].replace(/[^\d]/g, '')) || 0;
+      }
+    }
+
+    if (!name || name.match(/^(이름|학생|성명|번호)$/)) continue;
+
+    students.push({ name, tuition });
+  }
+
+  if (students.length === 0) {
+    alert('유효한 학생 데이터가 없습니다.\n\n형식 예시:\n최효준    280000\n장근혁    350000');
+    return;
+  }
+
+  const existingStudents = getSpecialLectureStudents(lectureId, selectedMonth);
+  const nextId = existingStudents.length > 0
+    ? Math.max(...existingStudents.map(s => s.id || 0)) + 1
+    : 1;
+
+  const newStudents = students.map((s, i) => ({
+    id: nextId + i,
+    name: s.name,
+    tuition: s.tuition
+  }));
+
+  const totalTuition = newStudents.reduce((sum, s) => sum + s.tuition, 0);
+  const allStudents = [...existingStudents, ...newStudents];
+  setSpecialLectureStudents(lectureId, selectedMonth, allStudents);
+
+  textarea.value = '';
+  renderContent();
+  openSpecialLectureStudentManagement(lectureId);
+  showToast(`${newStudents.length}명 추가 완료! (총 ${formatKRW(totalTuition)})`);
 }
 
 function openAddSpecialLectureStudentModal(lectureId) {
@@ -2923,34 +3072,114 @@ function confirmDeleteSpecialLectureStudent(lectureId, studentId) {
 
 function handleSpecialLectureExcelUpload(input, lectureId) {
   if (input.files.length > 0) {
-    readCSVFile(input.files[0])
-      .then(students => {
-        if (students.length === 0) {
-          alert('유효한 학생 데이터가 없습니다.');
-          return;
+    const file = input.files[0];
+    const fileName = file.name.toLowerCase();
+    console.log('[v8] 파일 업로드:', fileName, file.size, 'bytes');
+
+    // XLSX 라이브러리 확인
+    if (typeof XLSX === 'undefined') {
+      alert('엑셀 라이브러리가 로드되지 않았습니다.\n\nCtrl+Shift+R을 눌러 페이지를 새로고침해주세요.');
+      return;
+    }
+
+    const lecture = getSpecialLectureById(lectureId);
+    const defaultTuition = lecture.tuitionPerStudent || 0;
+    const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+
+    console.log('[v8] 엑셀파일 여부:', isExcel, '기본수강료:', defaultTuition);
+
+    if (isExcel) {
+      // 엑셀 파일 직접 처리
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          console.log('[v8] FileReader 완료');
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+          console.log('[v8] 파싱된 행 수:', jsonData.length, jsonData.slice(0, 3));
+
+          // 학생 데이터 추출
+          const students = [];
+          const firstRow = jsonData[0] || [];
+          const hasHeader = String(firstRow[0] || '').match(/학생|이름|성명|번호|수강/);
+          const startIdx = hasHeader ? 1 : 0;
+
+          for (let i = startIdx; i < jsonData.length; i++) {
+            const row = jsonData[i];
+            if (!row || row.length === 0) continue;
+
+            const name = String(row[0] || '').trim();
+            if (!name) continue;
+
+            let tuition = 0;
+            if (row.length >= 2 && row[1] != null && row[1] !== '') {
+              tuition = parseInt(String(row[1]).replace(/[^\d]/g, '')) || 0;
+            }
+            if (tuition === 0) tuition = defaultTuition;
+
+            students.push({ name, tuition });
+          }
+
+          console.log('[v8] 추출된 학생:', students.length, students.slice(0, 3));
+          processStudents(students, lectureId);
+        } catch (err) {
+          console.error('[v8] 파싱 오류:', err);
+          alert('엑셀 파일 읽기 실패: ' + err.message);
+        }
+      };
+      reader.onerror = () => alert('파일 읽기 실패');
+      reader.readAsArrayBuffer(file);
+    } else {
+      // CSV/TXT 파일 처리
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const text = e.target.result;
+        const lines = text.split(/\r?\n/).filter(l => l.trim());
+        const students = [];
+
+        for (const line of lines) {
+          const parts = line.split(/[,\t]/);
+          const name = (parts[0] || '').trim();
+          if (!name || name.match(/학생|이름|성명/)) continue;
+
+          let tuition = parseInt((parts[1] || '').replace(/[^\d]/g, '')) || defaultTuition;
+          students.push({ name, tuition });
         }
 
-        const existingStudents = getSpecialLectureStudents(lectureId, selectedMonth);
-        const nextId = existingStudents.length > 0
-          ? Math.max(...existingStudents.map(s => s.id || 0)) + 1
-          : 1;
+        console.log('[v8] CSV 학생:', students.length);
+        processStudents(students, lectureId);
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
+  }
 
-        const newStudents = students.map((s, i) => ({
-          id: nextId + i,
-          name: s.name,
-          tuition: s.tuition
-        }));
+  function processStudents(students, lectureId) {
+    if (students.length === 0) {
+      alert('유효한 학생 데이터가 없습니다.\n\n형식:\n- 첫 번째 열: 학생 이름\n- 두 번째 열(선택): 수강료');
+      return;
+    }
 
-        const allStudents = [...existingStudents, ...newStudents];
-        setSpecialLectureStudents(lectureId, selectedMonth, allStudents);
+    const existingStudents = getSpecialLectureStudents(lectureId, selectedMonth);
+    const nextId = existingStudents.length > 0
+      ? Math.max(...existingStudents.map(s => s.id || 0)) + 1
+      : 1;
 
-        renderContent();
-        openSpecialLectureStudentManagement(lectureId);
-        showToast(`${newStudents.length}명의 학생이 추가되었습니다.`);
-      })
-      .catch(err => {
-        alert('파일 읽기 실패: ' + err.message);
-      });
+    const newStudents = students.map((s, i) => ({
+      id: nextId + i,
+      name: s.name,
+      tuition: s.tuition
+    }));
+
+    const allStudents = [...existingStudents, ...newStudents];
+    setSpecialLectureStudents(lectureId, selectedMonth, allStudents);
+
+    renderContent();
+    openSpecialLectureStudentManagement(lectureId);
+    showToast(`${newStudents.length}명의 학생이 추가되었습니다.`);
   }
   input.value = '';
 }
@@ -3050,10 +3279,10 @@ function changeStaffPassword() {
 
 // ============ 초기화 ============
 document.addEventListener('DOMContentLoaded', function () {
-  // 모달 외부 클릭시 닫기
-  document.getElementById('modalOverlay').addEventListener('click', (e) => {
-    if (e.target === e.currentTarget) closeModal();
-  });
+  // 모달 외부 클릭시 닫기 - 비활성화 (실수로 닫히는 것 방지)
+  // document.getElementById('modalOverlay').addEventListener('click', (e) => {
+  //   if (e.target === e.currentTarget) closeModal();
+  // });
 
   // 직원 선택 목록 초기화
   populateStaffSelect();

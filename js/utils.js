@@ -314,9 +314,13 @@ function downloadCSV(csvContent, filename) {
 
 /**
  * CSV 문자열을 파싱하여 학생 배열로 반환
- * 예상 형식: 학생명,수강료 (첫 번째 줄은 헤더로 간주)
+ * 형식 1: 학생명,수강료
+ * 형식 2: 학생명만 (기본 수강료 적용)
+ *
+ * @param {string} csvText - CSV 텍스트
+ * @param {number} defaultTuition - 기본 수강료 (이름만 있을 때 적용)
  */
-function parseStudentCSV(csvText) {
+function parseStudentCSV(csvText, defaultTuition = 0) {
   const lines = csvText.trim().split('\n');
   const students = [];
 
@@ -335,14 +339,21 @@ function parseStudentCSV(csvText) {
       cells = parseCSVLine(line);
     }
 
-    if (cells.length >= 2) {
-      const name = cells[0].trim();
-      const tuition = parseInt(cells[1].replace(/[^\d]/g, '')) || 0;
+    const name = cells[0]?.trim();
+    if (!name) continue;
 
-      if (name && tuition > 0) {
-        students.push({ name, tuition });
-      }
+    // 수강료: 입력값 있으면 사용, 없으면 기본값 적용
+    let tuition = 0;
+    if (cells.length >= 2 && cells[1]) {
+      tuition = parseInt(cells[1].replace(/[^\d]/g, '')) || 0;
     }
+
+    // 수강료가 없으면 기본 수강료 적용
+    if (tuition === 0 && defaultTuition > 0) {
+      tuition = defaultTuition;
+    }
+
+    students.push({ name, tuition });
   }
 
   return students;
@@ -380,14 +391,16 @@ function parseCSVLine(line) {
 
 /**
  * 파일 객체에서 CSV 읽기
+ * @param {File} file - 파일 객체
+ * @param {number} defaultTuition - 기본 수강료 (이름만 있을 때 적용)
  */
-function readCSVFile(file) {
+function readCSVFile(file, defaultTuition = 0) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const text = e.target.result;
-        const students = parseStudentCSV(text);
+        const students = parseStudentCSV(text, defaultTuition);
         resolve(students);
       } catch (err) {
         reject(err);
@@ -396,6 +409,102 @@ function readCSVFile(file) {
     reader.onerror = reject;
     reader.readAsText(file, 'UTF-8');
   });
+}
+
+/**
+ * Excel 파일(.xlsx, .xls) 또는 CSV 파일 읽기
+ * @param {File} file - 파일 객체
+ * @param {number} defaultTuition - 기본 수강료 (이름만 있을 때 적용)
+ */
+function readStudentFile(file, defaultTuition = 0) {
+  console.log('[readStudentFile] 함수 호출됨 - v6');
+  return new Promise((resolve, reject) => {
+    const fileName = file.name.toLowerCase();
+    const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+    console.log('[readStudentFile] 파일명:', fileName, '엑셀여부:', isExcel);
+
+    if (isExcel) {
+      // Excel 파일 읽기
+      console.log('[readStudentFile] 엑셀 파일 처리 시작');
+
+      if (typeof XLSX === 'undefined') {
+        reject(new Error('XLSX 라이브러리가 로드되지 않았습니다. 페이지를 새로고침하세요.'));
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          console.log('[readStudentFile] FileReader 완료, 데이터 크기:', e.target.result.byteLength);
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          console.log('[readStudentFile] XLSX 파싱 성공, 시트:', workbook.SheetNames);
+
+          // 첫 번째 시트 사용
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+
+          // 시트를 JSON으로 변환
+          const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+          const students = parseExcelData(jsonData, defaultTuition);
+          resolve(students);
+        } catch (err) {
+          reject(new Error('엑셀 파일 읽기 실패: ' + err.message));
+        }
+      };
+      reader.onerror = () => reject(new Error('파일 읽기 실패'));
+      reader.readAsArrayBuffer(file);
+    } else {
+      // CSV/TXT 파일 읽기
+      readCSVFile(file, defaultTuition).then(resolve).catch(reject);
+    }
+  });
+}
+
+/**
+ * Excel 데이터(2차원 배열)를 학생 배열로 변환
+ * @param {Array} data - 2차원 배열 [[row1], [row2], ...]
+ * @param {number} defaultTuition - 기본 수강료
+ */
+function parseExcelData(data, defaultTuition = 0) {
+  const students = [];
+
+  if (!data || data.length === 0) return students;
+
+  // 첫 번째 행이 헤더인지 확인
+  const firstRow = data[0];
+  const isHeader = firstRow && (
+    String(firstRow[0]).includes('학생') ||
+    String(firstRow[0]).includes('이름') ||
+    String(firstRow[0]).includes('성명') ||
+    String(firstRow[0]).includes('수강')
+  );
+
+  const startIndex = isHeader ? 1 : 0;
+
+  for (let i = startIndex; i < data.length; i++) {
+    const row = data[i];
+    if (!row || row.length === 0) continue;
+
+    const name = String(row[0] || '').trim();
+    if (!name) continue;
+
+    // 수강료: 두 번째 열이 있으면 사용, 없으면 기본값
+    let tuition = 0;
+    if (row.length >= 2 && row[1] !== undefined && row[1] !== null && row[1] !== '') {
+      tuition = parseInt(String(row[1]).replace(/[^\d]/g, '')) || 0;
+    }
+
+    // 수강료가 없으면 기본 수강료 적용
+    if (tuition === 0 && defaultTuition > 0) {
+      tuition = defaultTuition;
+    }
+
+    students.push({ name, tuition });
+  }
+
+  return students;
 }
 
 // ============ 문자 생성 ============
