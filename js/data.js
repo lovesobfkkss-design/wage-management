@@ -41,6 +41,13 @@ function getDefaultData() {
     // 비율제 강사 학생 데이터 (월별)
     // 형식: { instructorId, monthKey, students: [{ name, tuition }] }
     commissionStudents: [],
+    // 4대보험 직원 (월급제)
+    insuranceTeachers: [],
+    // 특강 목록
+    specialLectures: [],
+    // 특강 학생 데이터 (월별)
+    // 형식: { lectureId, monthKey, students: [{ id, name, tuition }] }
+    specialLectureStudents: [],
     // 설정
     settings: {
       minimumWage: MINIMUM_WAGE,
@@ -88,6 +95,22 @@ function ensureDataCompatibility(data) {
   // 기존 비율제 강사에 businessId 없으면 기본값 할당
   data.commissionInstructors.forEach(i => {
     if (!i.businessId) i.businessId = 2;
+  });
+
+  // 4대보험 직원 데이터 호환성 처리
+  if (!data.insuranceTeachers) data.insuranceTeachers = [];
+  data.insuranceTeachers.forEach(t => {
+    if (!t.businessId) t.businessId = 2;
+    if (t.hireDate === undefined) t.hireDate = null;
+    if (t.terminationDate === undefined) t.terminationDate = null;
+    if (t.position === undefined) t.position = null;
+  });
+
+  // 특강 데이터 호환성 처리
+  if (!data.specialLectures) data.specialLectures = [];
+  if (!data.specialLectureStudents) data.specialLectureStudents = [];
+  data.specialLectures.forEach(l => {
+    if (!l.businessId) l.businessId = 2;
   });
 
   return data;
@@ -224,8 +247,10 @@ function deleteBusiness(id) {
   // 소속 직원 확인
   const hasStaff = appData.staff.some(s => s.businessId === id);
   const hasInstructor = appData.commissionInstructors.some(i => i.businessId === id);
+  const hasInsuranceTeacher = appData.insuranceTeachers.some(t => t.businessId === id);
+  const hasSpecialLecture = appData.specialLectures.some(l => l.businessId === id);
 
-  if (hasStaff || hasInstructor) {
+  if (hasStaff || hasInstructor || hasInsuranceTeacher || hasSpecialLecture) {
     return { success: false, message: '해당 사업장에 소속된 직원이 있어 삭제할 수 없습니다.' };
   }
 
@@ -411,6 +436,165 @@ function deleteCommissionStudent(instructorId, monthKey, studentId) {
   let students = getCommissionStudents(instructorId, monthKey);
   students = students.filter(s => s.id !== studentId);
   setCommissionStudents(instructorId, monthKey, students);
+}
+
+// ============ 4대보험 직원 관리 ============
+
+// 사업장별 4대보험 직원 목록 조회
+function getInsuranceTeachersByBusiness(businessId) {
+  if (businessId === 'all') {
+    return appData.insuranceTeachers;
+  }
+  return appData.insuranceTeachers.filter(t => t.businessId === businessId);
+}
+
+// 4대보험 직원 조회
+function getInsuranceTeacherById(id) {
+  return appData.insuranceTeachers.find(t => t.id === id);
+}
+
+// 4대보험 직원 추가
+function addInsuranceTeacher(info) {
+  const newId = appData.insuranceTeachers.length > 0
+    ? Math.max(...appData.insuranceTeachers.map(t => t.id)) + 1
+    : 1;
+  const newTeacher = {
+    id: newId,
+    name: info.name,
+    type: 'insuranceTeacher',
+    businessId: info.businessId,
+    monthlySalary: info.monthlySalary,
+    hireDate: info.hireDate || null,
+    terminationDate: info.terminationDate || null,
+    position: info.position || null
+  };
+  appData.insuranceTeachers.push(newTeacher);
+  saveData(appData);
+  return newTeacher;
+}
+
+// 4대보험 직원 수정
+function updateInsuranceTeacher(id, updates) {
+  const teacher = getInsuranceTeacherById(id);
+  if (teacher) {
+    Object.assign(teacher, updates);
+    saveData(appData);
+  }
+  return teacher;
+}
+
+// 4대보험 직원 삭제
+function deleteInsuranceTeacher(id) {
+  appData.insuranceTeachers = appData.insuranceTeachers.filter(t => t.id !== id);
+  saveData(appData);
+}
+
+// ============ 특강 관리 ============
+
+// 사업장별 특강 목록 조회
+function getSpecialLecturesByBusiness(businessId) {
+  if (businessId === 'all') {
+    return appData.specialLectures;
+  }
+  return appData.specialLectures.filter(l => l.businessId === businessId);
+}
+
+// 특강 조회
+function getSpecialLectureById(id) {
+  return appData.specialLectures.find(l => l.id === id);
+}
+
+// 특강 추가
+function addSpecialLecture(info) {
+  const newId = appData.specialLectures.length > 0
+    ? Math.max(...appData.specialLectures.map(l => l.id)) + 1
+    : 1;
+  const newLecture = {
+    id: newId,
+    name: info.name,
+    subject: info.subject,
+    instructorName: info.instructorName,
+    commissionRate: info.commissionRate,
+    businessId: info.businessId,
+    startDate: info.startDate || null,
+    endDate: info.endDate || null,
+    tuitionPerStudent: info.tuitionPerStudent || 0
+  };
+  appData.specialLectures.push(newLecture);
+  saveData(appData);
+  return newLecture;
+}
+
+// 특강 수정
+function updateSpecialLecture(id, updates) {
+  const lecture = getSpecialLectureById(id);
+  if (lecture) {
+    Object.assign(lecture, updates);
+    saveData(appData);
+  }
+  return lecture;
+}
+
+// 특강 삭제
+function deleteSpecialLecture(id) {
+  appData.specialLectures = appData.specialLectures.filter(l => l.id !== id);
+  // 관련 학생 데이터도 삭제
+  appData.specialLectureStudents = appData.specialLectureStudents.filter(s => s.lectureId !== id);
+  saveData(appData);
+}
+
+// ============ 특강 학생 관리 ============
+
+// 특정 특강의 월별 학생 데이터 조회
+function getSpecialLectureStudents(lectureId, monthKey) {
+  const record = appData.specialLectureStudents.find(
+    s => s.lectureId === lectureId && s.monthKey === monthKey
+  );
+  return record ? record.students : [];
+}
+
+// 특정 특강의 월별 학생 데이터 설정 (덮어쓰기)
+function setSpecialLectureStudents(lectureId, monthKey, students) {
+  const existingIndex = appData.specialLectureStudents.findIndex(
+    s => s.lectureId === lectureId && s.monthKey === monthKey
+  );
+
+  if (existingIndex >= 0) {
+    appData.specialLectureStudents[existingIndex].students = students;
+  } else {
+    appData.specialLectureStudents.push({
+      lectureId,
+      monthKey,
+      students
+    });
+  }
+  saveData(appData);
+}
+
+// 특강 학생 추가 (개별)
+function addSpecialLectureStudent(lectureId, monthKey, student) {
+  const students = getSpecialLectureStudents(lectureId, monthKey);
+  const newId = students.length > 0 ? Math.max(...students.map(s => s.id || 0)) + 1 : 1;
+  students.push({ id: newId, ...student });
+  setSpecialLectureStudents(lectureId, monthKey, students);
+  return newId;
+}
+
+// 특강 학생 수정
+function updateSpecialLectureStudent(lectureId, monthKey, studentId, updates) {
+  const students = getSpecialLectureStudents(lectureId, monthKey);
+  const student = students.find(s => s.id === studentId);
+  if (student) {
+    Object.assign(student, updates);
+    setSpecialLectureStudents(lectureId, monthKey, students);
+  }
+}
+
+// 특강 학생 삭제
+function deleteSpecialLectureStudent(lectureId, monthKey, studentId) {
+  let students = getSpecialLectureStudents(lectureId, monthKey);
+  students = students.filter(s => s.id !== studentId);
+  setSpecialLectureStudents(lectureId, monthKey, students);
 }
 
 // ============ 데이터 내보내기/가져오기 ============

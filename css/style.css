@@ -476,6 +476,16 @@ tr:hover {
   color: #276749;
 }
 
+.badge-insurance {
+  background: #fed7d7;
+  color: #c53030;
+}
+
+.badge-special {
+  background: #e9d5ff;
+  color: #7e22ce;
+}
+
 /* ============ Empty State ============ */
 .empty-state {
   text-align: center;

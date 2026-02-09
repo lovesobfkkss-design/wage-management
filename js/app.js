@@ -117,7 +117,9 @@ function renderNavTabs() {
     navTabs.innerHTML = `
       <button class="nav-tab ${currentTab === 'dashboard' ? 'active' : ''}" onclick="switchTab('dashboard')">대시보드</button>
       <button class="nav-tab ${currentTab === 'staff' ? 'active' : ''}" onclick="switchTab('staff')">직원관리</button>
+      <button class="nav-tab ${currentTab === 'insurance' ? 'active' : ''}" onclick="switchTab('insurance')">4대보험</button>
       <button class="nav-tab ${currentTab === 'commission' ? 'active' : ''}" onclick="switchTab('commission')">비율제강사</button>
+      <button class="nav-tab ${currentTab === 'specialLecture' ? 'active' : ''}" onclick="switchTab('specialLecture')">특강관리</button>
       <button class="nav-tab ${currentTab === 'worklogs' ? 'active' : ''}" onclick="switchTab('worklogs')">근무기록</button>
       <button class="nav-tab ${currentTab === 'payroll' ? 'active' : ''}" onclick="switchTab('payroll')">급여정산</button>
       <button class="nav-tab ${currentTab === 'messages' ? 'active' : ''}" onclick="switchTab('messages')">문자생성</button>
@@ -151,8 +153,14 @@ function renderContent() {
     case 'staff':
       renderStaffManagement(main);
       break;
+    case 'insurance':
+      renderInsuranceTeachers(main);
+      break;
     case 'commission':
       renderCommissionInstructors(main);
+      break;
+    case 'specialLecture':
+      renderSpecialLectures(main);
       break;
     case 'worklogs':
       renderWorkLogs(main);
@@ -2246,6 +2254,705 @@ function addManualLog() {
   document.getElementById('manualHours').value = '';
   document.getElementById('manualMemo').value = '';
   showToast('근무 기록이 추가되었습니다!');
+}
+
+// ============ 4대보험 직원 관리 ============
+let showTerminatedInsurance = false;
+
+function renderInsuranceTeachers(container) {
+  const allTeachers = getInsuranceTeachersByBusiness(selectedBusiness);
+
+  // 퇴사자 필터링
+  const activeTeachers = allTeachers.filter(t => !t.terminationDate);
+  const terminatedTeachers = allTeachers.filter(t => !!t.terminationDate);
+  const filteredTeachers = showTerminatedInsurance ? allTeachers : activeTeachers;
+
+  container.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+      <h2 style="color: var(--primary);">4대보험 직원 관리</h2>
+      <div style="display: flex; gap: 1rem; align-items: center;">
+        ${terminatedTeachers.length > 0 ? `
+          <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text-light); cursor: pointer;">
+            <input type="checkbox" ${showTerminatedInsurance ? 'checked' : ''} onchange="toggleTerminatedInsurance(this.checked)">
+            퇴사자 포함 (${terminatedTeachers.length}명)
+          </label>
+        ` : ''}
+        <button class="btn btn-primary" onclick="openAddInsuranceTeacherModal()">+ 직원 추가</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">등록된 4대보험 직원 (${filteredTeachers.length}명)</h3>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>이름</th>
+              <th>소속</th>
+              <th>직급</th>
+              <th>월급여</th>
+              <th>4대보험 공제</th>
+              <th>실지급액</th>
+              <th>입사일</th>
+              <th>관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filteredTeachers.length > 0 ? filteredTeachers.map(teacher => {
+              const isTerminated = !!teacher.terminationDate;
+              const rowStyle = isTerminated ? 'background: #fafafa; opacity: 0.7;' : '';
+              const nameStyle = isTerminated ? 'text-decoration: line-through; color: var(--text-light);' : '';
+              const calc = calculateInsuranceDeduction(teacher.monthlySalary);
+              const businessName = getBusinessName(teacher.businessId);
+
+              return `
+                <tr style="${rowStyle}">
+                  <td>
+                    <strong style="${nameStyle}">${teacher.name}</strong>
+                    ${isTerminated ? '<span class="badge" style="background: #ffebee; color: #c62828; margin-left: 0.5rem; font-size: 0.7rem;">퇴사</span>' : ''}
+                  </td>
+                  <td><span class="badge badge-business">${businessName}</span></td>
+                  <td>${teacher.position || '-'}</td>
+                  <td>${formatKRW(teacher.monthlySalary)}</td>
+                  <td style="color: var(--danger);">-${formatKRW(calc.totalDeduction)}</td>
+                  <td><strong style="color: var(--success);">${formatKRW(calc.netPay)}</strong></td>
+                  <td style="font-size: 0.8125rem;">${teacher.hireDate || '-'}</td>
+                  <td>
+                    <div class="actions">
+                      <button class="btn btn-primary btn-sm" onclick="showInsuranceDetailModal(${teacher.id})">상세</button>
+                      <button class="btn btn-outline btn-sm" onclick="openEditInsuranceTeacherModal(${teacher.id})">수정</button>
+                      <button class="btn btn-danger btn-sm" onclick="confirmDeleteInsuranceTeacher(${teacher.id})">삭제</button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join('') : '<tr><td colspan="8" class="empty-state">등록된 4대보험 직원이 없습니다.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function toggleTerminatedInsurance(show) {
+  showTerminatedInsurance = show;
+  renderContent();
+}
+
+function openAddInsuranceTeacherModal() {
+  document.getElementById('modalTitle').textContent = '4대보험 직원 추가';
+  document.getElementById('modalBody').innerHTML = getInsuranceTeacherFormHTML();
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveNewInsuranceTeacher()">저장</button>
+  `;
+  openModal();
+}
+
+function getInsuranceTeacherFormHTML(teacher = null) {
+  const defaultBusinessId = teacher?.businessId ||
+    (selectedBusiness !== 'all' ? selectedBusiness : appData.businesses[0]?.id);
+
+  const positionOptions = ['원장', '실장', '주임', '일반'];
+  const isCustomPosition = teacher?.position && !positionOptions.includes(teacher.position);
+
+  return `
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">이름 *</label>
+        <input type="text" id="insTeacherName" class="form-input" value="${teacher?.name || ''}" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">소속 사업장 *</label>
+        <select id="insTeacherBusinessId" class="form-select">
+          ${appData.businesses.map(b =>
+            `<option value="${b.id}" ${defaultBusinessId === b.id ? 'selected' : ''}>${b.name}</option>`
+          ).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">직급</label>
+        <select id="insTeacherPosition" class="form-select" onchange="toggleInsuranceCustomPosition(this)">
+          <option value="">선택 안함</option>
+          ${positionOptions.map(p => `
+            <option value="${p}" ${teacher?.position === p ? 'selected' : ''}>${p}</option>
+          `).join('')}
+          <option value="custom" ${isCustomPosition ? 'selected' : ''}>기타 (직접입력)</option>
+        </select>
+      </div>
+      <div class="form-group" id="insCustomPositionGroup" style="display: ${isCustomPosition ? 'block' : 'none'};">
+        <label class="form-label">직급 직접입력</label>
+        <input type="text" id="insTeacherPositionCustom" class="form-input" value="${isCustomPosition ? teacher.position : ''}" placeholder="직급 입력">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">월 급여 (세전) *</label>
+      <input type="number" id="insTeacherSalary" class="form-input" value="${teacher?.monthlySalary || 3000000}" min="0" step="10000">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">입사일</label>
+        <input type="date" id="insTeacherHireDate" class="form-input" value="${teacher?.hireDate || ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">퇴사일</label>
+        <input type="date" id="insTeacherTermDate" class="form-input" value="${teacher?.terminationDate || ''}">
+      </div>
+    </div>
+
+    <div style="background: var(--bg); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+      <strong>4대보험 공제 안내 (근로자 부담분)</strong>
+      <p style="font-size: 0.875rem; color: var(--text-light); margin-top: 0.5rem;">
+        • 국민연금: 4.75%<br>
+        • 건강보험: 3.595%<br>
+        • 장기요양: 건강보험의 13.14%<br>
+        • 고용보험: 0.9%
+      </p>
+    </div>
+  `;
+}
+
+function toggleInsuranceCustomPosition(select) {
+  const customGroup = document.getElementById('insCustomPositionGroup');
+  customGroup.style.display = select.value === 'custom' ? 'block' : 'none';
+}
+
+function getInsurancePositionValue() {
+  const select = document.getElementById('insTeacherPosition');
+  if (select.value === 'custom') {
+    return document.getElementById('insTeacherPositionCustom').value.trim() || null;
+  }
+  return select.value || null;
+}
+
+function saveNewInsuranceTeacher() {
+  const name = document.getElementById('insTeacherName').value.trim();
+  if (!name) {
+    alert('이름을 입력해주세요.');
+    return;
+  }
+
+  const hireDate = document.getElementById('insTeacherHireDate').value || null;
+  const terminationDate = document.getElementById('insTeacherTermDate').value || null;
+
+  if (hireDate && terminationDate && terminationDate < hireDate) {
+    alert('퇴사일은 입사일 이후여야 합니다.');
+    return;
+  }
+
+  addInsuranceTeacher({
+    name,
+    businessId: parseInt(document.getElementById('insTeacherBusinessId').value),
+    monthlySalary: parseInt(document.getElementById('insTeacherSalary').value) || 0,
+    hireDate,
+    terminationDate,
+    position: getInsurancePositionValue()
+  });
+
+  closeModal();
+  renderContent();
+  showToast('4대보험 직원이 추가되었습니다.');
+}
+
+function openEditInsuranceTeacherModal(id) {
+  const teacher = getInsuranceTeacherById(id);
+  document.getElementById('modalTitle').textContent = '4대보험 직원 수정';
+  document.getElementById('modalBody').innerHTML = getInsuranceTeacherFormHTML(teacher);
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveEditInsuranceTeacher(${id})">저장</button>
+  `;
+  openModal();
+}
+
+function saveEditInsuranceTeacher(id) {
+  const name = document.getElementById('insTeacherName').value.trim();
+  if (!name) {
+    alert('이름을 입력해주세요.');
+    return;
+  }
+
+  const hireDate = document.getElementById('insTeacherHireDate').value || null;
+  const terminationDate = document.getElementById('insTeacherTermDate').value || null;
+
+  if (hireDate && terminationDate && terminationDate < hireDate) {
+    alert('퇴사일은 입사일 이후여야 합니다.');
+    return;
+  }
+
+  updateInsuranceTeacher(id, {
+    name,
+    businessId: parseInt(document.getElementById('insTeacherBusinessId').value),
+    monthlySalary: parseInt(document.getElementById('insTeacherSalary').value) || 0,
+    hireDate,
+    terminationDate,
+    position: getInsurancePositionValue()
+  });
+
+  closeModal();
+  renderContent();
+  showToast('4대보험 직원 정보가 수정되었습니다.');
+}
+
+function showInsuranceDetailModal(id) {
+  const teacher = getInsuranceTeacherById(id);
+  const calc = calculateInsuranceDeduction(teacher.monthlySalary);
+
+  document.getElementById('modalTitle').textContent = `${teacher.name} 4대보험 상세`;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="summary-grid" style="margin-bottom: 1rem;">
+      <div class="summary-card">
+        <div class="summary-label" style="color: var(--text-light);">월 급여 (세전)</div>
+        <div class="summary-value" style="font-size: 1.25rem;">${formatKRW(calc.monthlySalary)}</div>
+      </div>
+      <div class="summary-card primary">
+        <div class="summary-label">실지급액</div>
+        <div class="summary-value" style="font-size: 1.25rem;">${formatKRW(calc.netPay)}</div>
+      </div>
+    </div>
+
+    <h4 style="margin-bottom: 0.75rem; color: var(--primary);">4대보험 공제 내역</h4>
+    <table style="width: 100%;">
+      <tbody>
+        ${calc.breakdown.map(item => `
+          <tr>
+            <td style="padding: 0.5rem 0;">${item.name}</td>
+            <td style="padding: 0.5rem 0; color: var(--text-light); font-size: 0.875rem;">${item.rate}</td>
+            <td style="padding: 0.5rem 0; text-align: right; color: var(--danger);">-${formatKRW(item.amount)}</td>
+          </tr>
+        `).join('')}
+        <tr style="border-top: 2px solid var(--border); font-weight: 700;">
+          <td style="padding: 0.75rem 0;" colspan="2">총 공제액</td>
+          <td style="padding: 0.75rem 0; text-align: right; color: var(--danger);">-${formatKRW(calc.totalDeduction)}</td>
+        </tr>
+      </tbody>
+    </table>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">닫기</button>
+  `;
+  openModal();
+}
+
+function confirmDeleteInsuranceTeacher(id) {
+  const teacher = getInsuranceTeacherById(id);
+  if (confirm(`${teacher.name}님을 삭제하시겠습니까?`)) {
+    deleteInsuranceTeacher(id);
+    renderContent();
+    showToast('4대보험 직원이 삭제되었습니다.');
+  }
+}
+
+// ============ 특강 관리 ============
+let selectedSpecialLecture = null;
+
+function renderSpecialLectures(container) {
+  const { year, month } = parseMonthKey(selectedMonth);
+  const filteredLectures = getSpecialLecturesByBusiness(selectedBusiness);
+
+  container.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+      <h2 style="color: var(--primary);">특강 관리</h2>
+      <div style="display: flex; gap: 1rem; align-items: center;">
+        <div class="month-selector">
+          <input type="month" value="${selectedMonth}" onchange="changeMonth(this.value)">
+        </div>
+        <button class="btn btn-primary" onclick="openAddSpecialLectureModal()">+ 특강 추가</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">등록된 특강 (${filteredLectures.length}개)</h3>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>특강명</th>
+              <th>과목</th>
+              <th>강사</th>
+              <th>비율</th>
+              <th>기간</th>
+              <th>${month}월 학생수</th>
+              <th>${month}월 수강료</th>
+              <th>${month}월 예상지급액</th>
+              <th>관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filteredLectures.length > 0 ? filteredLectures.map(lecture => {
+              const students = getSpecialLectureStudents(lecture.id, selectedMonth);
+              const calc = students.length > 0 ? calculateSpecialLecture(lecture, students, appData.settings) : null;
+              const businessName = getBusinessName(lecture.businessId);
+              const period = lecture.startDate && lecture.endDate
+                ? `${lecture.startDate} ~ ${lecture.endDate}`
+                : '-';
+
+              return `
+                <tr>
+                  <td>
+                    <strong>${lecture.name}</strong>
+                    <br><span class="badge badge-business" style="font-size: 0.7rem;">${businessName}</span>
+                  </td>
+                  <td><span class="badge badge-special">${lecture.subject}</span></td>
+                  <td>${lecture.instructorName}</td>
+                  <td><span class="badge badge-part">${formatPercent(lecture.commissionRate)}</span></td>
+                  <td style="font-size: 0.8125rem;">${period}</td>
+                  <td>${students.length}명</td>
+                  <td>${calc ? formatKRW(calc.totalTuition) : '-'}</td>
+                  <td><strong style="color: var(--success);">${calc ? formatKRW(calc.netPay) : '-'}</strong></td>
+                  <td>
+                    <div class="actions">
+                      <button class="btn btn-accent btn-sm" onclick="openSpecialLectureStudentManagement(${lecture.id})">학생관리</button>
+                      <button class="btn btn-outline btn-sm" onclick="openEditSpecialLectureModal(${lecture.id})">수정</button>
+                      <button class="btn btn-danger btn-sm" onclick="confirmDeleteSpecialLecture(${lecture.id})">삭제</button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join('') : '<tr><td colspan="9" class="empty-state">등록된 특강이 없습니다.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="specialLectureStudentSection"></div>
+  `;
+}
+
+function openAddSpecialLectureModal() {
+  document.getElementById('modalTitle').textContent = '특강 추가';
+  document.getElementById('modalBody').innerHTML = getSpecialLectureFormHTML();
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveNewSpecialLecture()">저장</button>
+  `;
+  openModal();
+}
+
+function getSpecialLectureFormHTML(lecture = null) {
+  const defaultBusinessId = lecture?.businessId ||
+    (selectedBusiness !== 'all' ? selectedBusiness : appData.businesses[0]?.id);
+
+  return `
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">특강명 *</label>
+        <input type="text" id="specialLectureName" class="form-input" value="${lecture?.name || ''}" placeholder="예: 겨울특강 수학">
+      </div>
+      <div class="form-group">
+        <label class="form-label">과목 *</label>
+        <input type="text" id="specialLectureSubject" class="form-input" value="${lecture?.subject || ''}" placeholder="예: 수학, 영어">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">강사 이름 *</label>
+        <input type="text" id="specialLectureInstructor" class="form-input" value="${lecture?.instructorName || ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">강사 비율 (%) *</label>
+        <input type="number" id="specialLectureRate" class="form-input" value="${lecture ? lecture.commissionRate * 100 : 50}" min="1" max="100" step="1">
+        <small style="color: var(--text-light);">동일 강사도 과목별로 다른 비율 적용 가능</small>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">소속 사업장 *</label>
+        <select id="specialLectureBusinessId" class="form-select">
+          ${appData.businesses.map(b =>
+            `<option value="${b.id}" ${defaultBusinessId === b.id ? 'selected' : ''}>${b.name}</option>`
+          ).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">기본 수강료 (1인)</label>
+        <input type="number" id="specialLectureTuition" class="form-input" value="${lecture?.tuitionPerStudent || 0}" min="0" step="10000">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">시작일</label>
+        <input type="date" id="specialLectureStartDate" class="form-input" value="${lecture?.startDate || ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">종료일</label>
+        <input type="date" id="specialLectureEndDate" class="form-input" value="${lecture?.endDate || ''}">
+      </div>
+    </div>
+
+    <div style="background: var(--bg); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+      <strong>공제 안내</strong>
+      <p style="font-size: 0.875rem; color: var(--text-light); margin-top: 0.5rem;">
+        • 카드수수료 1% (전체 수강료에서 먼저 공제)<br>
+        • 사업소득세 3.3% (강사 몫에서 공제)
+      </p>
+    </div>
+  `;
+}
+
+function saveNewSpecialLecture() {
+  const name = document.getElementById('specialLectureName').value.trim();
+  const subject = document.getElementById('specialLectureSubject').value.trim();
+  const instructorName = document.getElementById('specialLectureInstructor').value.trim();
+
+  if (!name || !subject || !instructorName) {
+    alert('특강명, 과목, 강사 이름을 입력해주세요.');
+    return;
+  }
+
+  addSpecialLecture({
+    name,
+    subject,
+    instructorName,
+    commissionRate: parseFloat(document.getElementById('specialLectureRate').value) / 100,
+    businessId: parseInt(document.getElementById('specialLectureBusinessId').value),
+    tuitionPerStudent: parseInt(document.getElementById('specialLectureTuition').value) || 0,
+    startDate: document.getElementById('specialLectureStartDate').value || null,
+    endDate: document.getElementById('specialLectureEndDate').value || null
+  });
+
+  closeModal();
+  renderContent();
+  showToast('특강이 추가되었습니다.');
+}
+
+function openEditSpecialLectureModal(id) {
+  const lecture = getSpecialLectureById(id);
+  document.getElementById('modalTitle').textContent = '특강 수정';
+  document.getElementById('modalBody').innerHTML = getSpecialLectureFormHTML(lecture);
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveEditSpecialLecture(${id})">저장</button>
+  `;
+  openModal();
+}
+
+function saveEditSpecialLecture(id) {
+  const name = document.getElementById('specialLectureName').value.trim();
+  const subject = document.getElementById('specialLectureSubject').value.trim();
+  const instructorName = document.getElementById('specialLectureInstructor').value.trim();
+
+  if (!name || !subject || !instructorName) {
+    alert('특강명, 과목, 강사 이름을 입력해주세요.');
+    return;
+  }
+
+  updateSpecialLecture(id, {
+    name,
+    subject,
+    instructorName,
+    commissionRate: parseFloat(document.getElementById('specialLectureRate').value) / 100,
+    businessId: parseInt(document.getElementById('specialLectureBusinessId').value),
+    tuitionPerStudent: parseInt(document.getElementById('specialLectureTuition').value) || 0,
+    startDate: document.getElementById('specialLectureStartDate').value || null,
+    endDate: document.getElementById('specialLectureEndDate').value || null
+  });
+
+  closeModal();
+  renderContent();
+  showToast('특강 정보가 수정되었습니다.');
+}
+
+function confirmDeleteSpecialLecture(id) {
+  const lecture = getSpecialLectureById(id);
+  if (confirm(`${lecture.name} 특강을 삭제하시겠습니까? 관련 학생 데이터도 함께 삭제됩니다.`)) {
+    deleteSpecialLecture(id);
+    renderContent();
+    showToast('특강이 삭제되었습니다.');
+  }
+}
+
+// ============ 특강 학생 관리 ============
+function openSpecialLectureStudentManagement(lectureId) {
+  selectedSpecialLecture = lectureId;
+  const lecture = getSpecialLectureById(lectureId);
+  const students = getSpecialLectureStudents(lectureId, selectedMonth);
+  const { year, month } = parseMonthKey(selectedMonth);
+  const calc = students.length > 0 ? calculateSpecialLecture(lecture, students, appData.settings) : null;
+
+  const html = `
+    <div class="card" style="margin-top: 1.5rem;">
+      <div class="card-header">
+        <h3 class="card-title">${lecture.name} (${lecture.subject}) - ${month}월 학생 관리</h3>
+        <div style="display: flex; gap: 0.5rem;">
+          <label class="btn btn-success btn-sm" style="cursor: pointer;">
+            Excel 업로드
+            <input type="file" accept=".csv,.txt" style="display: none;" onchange="handleSpecialLectureExcelUpload(this, ${lectureId})">
+          </label>
+          <button class="btn btn-primary btn-sm" onclick="openAddSpecialLectureStudentModal(${lectureId})">+ 학생 추가</button>
+        </div>
+      </div>
+
+      ${calc ? `
+        <div class="summary-grid" style="margin-bottom: 1rem;">
+          <div class="summary-card">
+            <div class="summary-label" style="color: var(--text-light);">총 수강료</div>
+            <div class="summary-value" style="font-size: 1.25rem;">${formatKRW(calc.totalTuition)}</div>
+          </div>
+          <div class="summary-card">
+            <div class="summary-label" style="color: var(--text-light);">강사: ${lecture.instructorName}</div>
+            <div class="summary-value" style="font-size: 1.25rem;">${formatPercent(lecture.commissionRate)}</div>
+          </div>
+          <div class="summary-card primary">
+            <div class="summary-label">강사 실지급액</div>
+            <div class="summary-value" style="font-size: 1.25rem;">${formatKRW(calc.netPay)}</div>
+          </div>
+        </div>
+      ` : ''}
+
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>학생명</th>
+              <th>수강료</th>
+              <th>관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${students.length > 0 ? students.map(student => `
+              <tr>
+                <td>${student.name}</td>
+                <td>${formatKRW(student.tuition)}</td>
+                <td>
+                  <div class="actions">
+                    <button class="btn btn-outline btn-sm" onclick="openEditSpecialLectureStudentModal(${lectureId}, ${student.id})">수정</button>
+                    <button class="btn btn-danger btn-sm" onclick="confirmDeleteSpecialLectureStudent(${lectureId}, ${student.id})">삭제</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('') : '<tr><td colspan="3" class="empty-state">등록된 학생이 없습니다.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('specialLectureStudentSection').innerHTML = html;
+}
+
+function openAddSpecialLectureStudentModal(lectureId) {
+  const lecture = getSpecialLectureById(lectureId);
+
+  document.getElementById('modalTitle').textContent = '학생 추가';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">학생명 *</label>
+      <input type="text" id="slStudentName" class="form-input" placeholder="학생 이름">
+    </div>
+    <div class="form-group">
+      <label class="form-label">수강료 *</label>
+      <input type="number" id="slStudentTuition" class="form-input" value="${lecture.tuitionPerStudent || 0}" min="0" step="10000">
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveNewSpecialLectureStudent(${lectureId})">저장</button>
+  `;
+  openModal();
+}
+
+function saveNewSpecialLectureStudent(lectureId) {
+  const name = document.getElementById('slStudentName').value.trim();
+  const tuition = parseInt(document.getElementById('slStudentTuition').value) || 0;
+
+  if (!name) {
+    alert('학생명을 입력해주세요.');
+    return;
+  }
+
+  addSpecialLectureStudent(lectureId, selectedMonth, { name, tuition });
+  closeModal();
+  renderContent();
+  openSpecialLectureStudentManagement(lectureId);
+  showToast('학생이 추가되었습니다.');
+}
+
+function openEditSpecialLectureStudentModal(lectureId, studentId) {
+  const students = getSpecialLectureStudents(lectureId, selectedMonth);
+  const student = students.find(s => s.id === studentId);
+
+  document.getElementById('modalTitle').textContent = '학생 수정';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">학생명 *</label>
+      <input type="text" id="slStudentName" class="form-input" value="${student.name}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">수강료 *</label>
+      <input type="number" id="slStudentTuition" class="form-input" value="${student.tuition}" min="0" step="10000">
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveEditSpecialLectureStudent(${lectureId}, ${studentId})">저장</button>
+  `;
+  openModal();
+}
+
+function saveEditSpecialLectureStudent(lectureId, studentId) {
+  const name = document.getElementById('slStudentName').value.trim();
+  const tuition = parseInt(document.getElementById('slStudentTuition').value) || 0;
+
+  if (!name) {
+    alert('학생명을 입력해주세요.');
+    return;
+  }
+
+  updateSpecialLectureStudent(lectureId, selectedMonth, studentId, { name, tuition });
+  closeModal();
+  renderContent();
+  openSpecialLectureStudentManagement(lectureId);
+  showToast('학생 정보가 수정되었습니다.');
+}
+
+function confirmDeleteSpecialLectureStudent(lectureId, studentId) {
+  if (confirm('이 학생을 삭제하시겠습니까?')) {
+    deleteSpecialLectureStudent(lectureId, selectedMonth, studentId);
+    renderContent();
+    openSpecialLectureStudentManagement(lectureId);
+    showToast('학생이 삭제되었습니다.');
+  }
+}
+
+function handleSpecialLectureExcelUpload(input, lectureId) {
+  if (input.files.length > 0) {
+    readCSVFile(input.files[0])
+      .then(students => {
+        if (students.length === 0) {
+          alert('유효한 학생 데이터가 없습니다.');
+          return;
+        }
+
+        const existingStudents = getSpecialLectureStudents(lectureId, selectedMonth);
+        const nextId = existingStudents.length > 0
+          ? Math.max(...existingStudents.map(s => s.id || 0)) + 1
+          : 1;
+
+        const newStudents = students.map((s, i) => ({
+          id: nextId + i,
+          name: s.name,
+          tuition: s.tuition
+        }));
+
+        const allStudents = [...existingStudents, ...newStudents];
+        setSpecialLectureStudents(lectureId, selectedMonth, allStudents);
+
+        renderContent();
+        openSpecialLectureStudentManagement(lectureId);
+        showToast(`${newStudents.length}명의 학생이 추가되었습니다.`);
+      })
+      .catch(err => {
+        alert('파일 읽기 실패: ' + err.message);
+      });
+  }
+  input.value = '';
 }
 
 // ============ 모달 ============

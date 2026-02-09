@@ -99,6 +99,61 @@ function calculateDeduction(staff, grossPay, settings) {
   };
 }
 
+// ============ 4대보험 공제 계산 ============
+
+/**
+ * 4대보험 공제율 (근로자 부담분)
+ * - 국민연금: 4.75%
+ * - 건강보험: 3.595%
+ * - 장기요양: 건강보험의 13.14%
+ * - 고용보험: 0.9%
+ */
+const INSURANCE_RATES = {
+  nationalPension: 0.0475,      // 국민연금 4.75%
+  healthInsurance: 0.03595,     // 건강보험 3.595%
+  longTermCare: 0.1314,         // 장기요양 13.14% (건강보험의)
+  employmentInsurance: 0.009    // 고용보험 0.9%
+};
+
+/**
+ * 4대보험 공제액 계산
+ */
+function calculateInsuranceDeduction(monthlySalary) {
+  // 국민연금
+  const nationalPension = Math.round(monthlySalary * INSURANCE_RATES.nationalPension);
+
+  // 건강보험
+  const healthInsurance = Math.round(monthlySalary * INSURANCE_RATES.healthInsurance);
+
+  // 장기요양보험 (건강보험료의 13.14%)
+  const longTermCare = Math.round(healthInsurance * INSURANCE_RATES.longTermCare);
+
+  // 고용보험
+  const employmentInsurance = Math.round(monthlySalary * INSURANCE_RATES.employmentInsurance);
+
+  // 총 공제액
+  const totalDeduction = nationalPension + healthInsurance + longTermCare + employmentInsurance;
+
+  // 실지급액
+  const netPay = monthlySalary - totalDeduction;
+
+  return {
+    monthlySalary,
+    nationalPension,
+    healthInsurance,
+    longTermCare,
+    employmentInsurance,
+    totalDeduction,
+    netPay,
+    breakdown: [
+      { name: '국민연금', amount: nationalPension, rate: '4.75%' },
+      { name: '건강보험', amount: healthInsurance, rate: '3.595%' },
+      { name: '장기요양', amount: longTermCare, rate: '건강보험의 13.14%' },
+      { name: '고용보험', amount: employmentInsurance, rate: '0.9%' }
+    ]
+  };
+}
+
 // ============ 비율제 강사 정산 계산 ============
 
 /**
@@ -136,6 +191,55 @@ function calculateCommission(instructor, students, settings) {
   const breakdown = `수강료 ${formatKRW(totalTuition)} - 카드1% ${formatKRW(cardFee)} = ${formatKRW(afterCardFee)} × ${ratePercent}%`;
 
   return {
+    totalTuition,
+    cardFee,
+    afterCardFee,
+    instructorGross,
+    academyShare,
+    incomeTax,
+    netPay,
+    totalDeduction,
+    breakdown,
+    studentCount: students.length
+  };
+}
+
+// ============ 특강 정산 계산 ============
+
+/**
+ * 특강 정산 계산
+ * - 동일한 강사가 과목별로 다른 비율 적용 가능
+ * - 카드수수료 1% + 사업소득세 3.3% 적용
+ */
+function calculateSpecialLecture(lecture, students, settings) {
+  // 1. 총 수강료 합계
+  const totalTuition = students.reduce((sum, s) => sum + (s.tuition || 0), 0);
+
+  // 2. 카드 수수료 공제
+  const cardFee = Math.round(totalTuition * settings.cardFeeRate);
+  const afterCardFee = totalTuition - cardFee;
+
+  // 3. 강사 비율 적용
+  const instructorGross = Math.round(afterCardFee * lecture.commissionRate);
+  const academyShare = afterCardFee - instructorGross;
+
+  // 4. 사업소득세 공제
+  const incomeTax = Math.round(instructorGross * settings.instructorDeduction);
+
+  // 5. 실지급액
+  const netPay = instructorGross - incomeTax;
+
+  // 총 공제액
+  const totalDeduction = cardFee + incomeTax;
+
+  // 정산 내역 문자열
+  const ratePercent = Math.round(lecture.commissionRate * 100);
+  const breakdown = `수강료 ${formatKRW(totalTuition)} - 카드1% ${formatKRW(cardFee)} = ${formatKRW(afterCardFee)} × ${ratePercent}%`;
+
+  return {
+    lectureName: lecture.name,
+    subject: lecture.subject,
+    instructorName: lecture.instructorName,
     totalTuition,
     cardFee,
     afterCardFee,
@@ -343,4 +447,46 @@ function generateCommissionMessage(instructor, monthKey, calc) {
 // 퍼센트 포맷 (비율 → 표시용)
 function formatPercent(rate) {
   return Math.round(rate * 100) + '%';
+}
+
+// 급여 확인 문자 생성 (4대보험 직원)
+function generateInsuranceMessage(teacher, monthKey, calc) {
+  const { month } = parseMonthKey(monthKey);
+
+  let message = `[${month}월 급여 정산 확인 요청]\n`;
+  message += `${teacher.name}님, ${month}월 급여 정산 내역 공유드립니다.\n\n`;
+
+  message += `• 월 급여: ${formatKRW(calc.monthlySalary)}\n\n`;
+  message += `[4대보험 공제 내역]\n`;
+  calc.breakdown.forEach(item => {
+    message += `• ${item.name} (${item.rate}): -${formatKRW(item.amount)}\n`;
+  });
+  message += `\n총 공제액: -${formatKRW(calc.totalDeduction)}\n`;
+  message += `→ 최종 지급예정액: ${formatKRW(calc.netPay)}\n\n`;
+  message += `맞는지 확인 후 답변 부탁드립니다.`;
+
+  return message;
+}
+
+// 급여 확인 문자 생성 (특강)
+function generateSpecialLectureMessage(lecture, monthKey, calc) {
+  const { month } = parseMonthKey(monthKey);
+  const ratePercent = Math.round(lecture.commissionRate * 100);
+
+  let message = `[${month}월 특강 정산 확인 요청]\n`;
+  message += `${lecture.instructorName}님, ${month}월 ${lecture.name} 정산 내역 공유드립니다.\n\n`;
+
+  message += `• 특강명: ${lecture.name}\n`;
+  message += `• 과목: ${lecture.subject}\n`;
+  message += `• 수강 학생 수: ${calc.studentCount}명\n`;
+  message += `• 총 수강료: ${formatKRW(calc.totalTuition)}\n`;
+  message += `• 카드수수료(1%): -${formatKRW(calc.cardFee)}\n`;
+  message += `• 수수료 공제 후: ${formatKRW(calc.afterCardFee)}\n`;
+  message += `• 강사 비율(${ratePercent}%): ${formatKRW(calc.instructorGross)}\n\n`;
+
+  message += `사업소득세(3.3%) 공제: -${formatKRW(calc.incomeTax)}\n`;
+  message += `→ 최종 지급예정액: ${formatKRW(calc.netPay)}\n\n`;
+  message += `맞는지 확인 후 답변 부탁드립니다.`;
+
+  return message;
 }
