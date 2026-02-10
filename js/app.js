@@ -2074,7 +2074,7 @@ function renderMyWork(container) {
               <th>퇴근</th>
               <th>근무시간</th>
               <th>메모</th>
-              <th>삭제</th>
+              <th>관리</th>
             </tr>
           </thead>
           <tbody>
@@ -2085,7 +2085,10 @@ function renderMyWork(container) {
                 <td>${log.endTime || '-'}</td>
                 <td>${formatHours(log.hours)}</td>
                 <td style="font-size: 0.8125rem; color: var(--text-light);">${log.memo || ''}</td>
-                <td><button class="btn btn-danger btn-sm" onclick="deleteMyWorkLog(${log.id})">삭제</button></td>
+                <td>
+                  <button class="btn btn-outline btn-sm" onclick="openEditWorkLogModal(${log.id})">수정</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteMyWorkLog(${log.id})">삭제</button>
+                </td>
               </tr>
             `).join('') || '<tr><td colspan="6" class="empty-state">이 달의 근무기록이 없습니다.</td></tr>'}
           </tbody>
@@ -2102,6 +2105,110 @@ function deleteMyWorkLog(logId) {
     renderContent();
     showToast('근무기록이 삭제되었습니다.');
   }
+}
+
+// 근무기록 수정 모달
+function openEditWorkLogModal(logId) {
+  const log = appData.workLogs.find(l => l.id === logId);
+  if (!log) {
+    showToast('근무기록을 찾을 수 없습니다.');
+    return;
+  }
+
+  const staff = getStaffById(log.staffId);
+  const staffName = staff ? staff.name : '알 수 없음';
+
+  document.getElementById('modalTitle').textContent = '근무기록 수정';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">직원</label>
+      <input type="text" class="form-input" value="${staffName}" disabled>
+    </div>
+    <div class="form-group">
+      <label class="form-label">날짜 *</label>
+      <input type="date" id="editLogDate" class="form-input" value="${log.date}">
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+      <div class="form-group">
+        <label class="form-label">출근 시간 *</label>
+        <input type="time" id="editLogStartTime" class="form-input" value="${log.startTime || ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">퇴근 시간 *</label>
+        <input type="time" id="editLogEndTime" class="form-input" value="${log.endTime || ''}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">휴게시간 (분)</label>
+      <input type="number" id="editLogBreak" class="form-input" value="${log.breakMinutes || 0}" min="0">
+    </div>
+    <div class="form-group">
+      <label class="form-label">메모</label>
+      <input type="text" id="editLogMemo" class="form-input" value="${log.memo || ''}" placeholder="메모 (선택)">
+    </div>
+    <div id="editLogPreview" style="margin-top: 1rem; padding: 1rem; background: var(--bg); border-radius: 8px;">
+      <strong>계산된 근무시간:</strong> <span id="editLogHoursPreview">${log.hours.toFixed(2)}시간</span>
+    </div>
+  `;
+
+  // 시간 변경 시 미리보기 업데이트
+  const updatePreview = () => {
+    const start = document.getElementById('editLogStartTime').value;
+    const end = document.getElementById('editLogEndTime').value;
+    const breakMin = parseInt(document.getElementById('editLogBreak').value) || 0;
+
+    if (start && end) {
+      const hours = calculateHours(start, end, breakMin, staff?.roundingRule || 'exact');
+      document.getElementById('editLogHoursPreview').textContent = hours.toFixed(2) + '시간';
+    }
+  };
+
+  document.getElementById('editLogStartTime').addEventListener('change', updatePreview);
+  document.getElementById('editLogEndTime').addEventListener('change', updatePreview);
+  document.getElementById('editLogBreak').addEventListener('change', updatePreview);
+
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveEditWorkLog(${logId})">저장</button>
+  `;
+  openModal();
+}
+
+// 근무기록 수정 저장
+function saveEditWorkLog(logId) {
+  const date = document.getElementById('editLogDate').value;
+  const startTime = document.getElementById('editLogStartTime').value;
+  const endTime = document.getElementById('editLogEndTime').value;
+  const breakMinutes = parseInt(document.getElementById('editLogBreak').value) || 0;
+  const memo = document.getElementById('editLogMemo').value.trim();
+
+  if (!date || !startTime || !endTime) {
+    alert('날짜와 출퇴근 시간을 모두 입력해주세요.');
+    return;
+  }
+
+  const log = appData.workLogs.find(l => l.id === logId);
+  if (!log) {
+    showToast('근무기록을 찾을 수 없습니다.');
+    return;
+  }
+
+  const staff = getStaffById(log.staffId);
+  const hours = calculateHours(startTime, endTime, breakMinutes, staff?.roundingRule || 'exact');
+
+  // 업데이트
+  log.date = date;
+  log.startTime = startTime;
+  log.endTime = endTime;
+  log.breakMinutes = breakMinutes;
+  log.hours = hours;
+  log.memo = memo;
+  log.modifiedAt = new Date().toISOString();
+
+  saveData(appData);
+  closeModal();
+  renderContent();
+  showToast('근무기록이 수정되었습니다.');
 }
 
 // ============ 직원 화면: 출퇴근 기록 ============
@@ -2322,6 +2429,7 @@ function renderInsuranceTeachers(container) {
                   <td>
                     <div class="actions">
                       <button class="btn btn-primary btn-sm" onclick="showInsuranceDetailModal(${teacher.id})">상세</button>
+                      <button class="btn btn-accent btn-sm" onclick="generateInsurancePDF(${teacher.id}, '${selectedMonth}')">PDF</button>
                       <button class="btn btn-outline btn-sm" onclick="openEditInsuranceTeacherModal(${teacher.id})">수정</button>
                       <button class="btn btn-danger btn-sm" onclick="confirmDeleteInsuranceTeacher(${teacher.id})">삭제</button>
                     </div>
@@ -2609,6 +2717,7 @@ function renderSpecialLectures(container) {
                   <td>
                     <div class="actions">
                       <button class="btn btn-accent btn-sm" onclick="openSpecialLectureStudentManagement(${lecture.id})">학생관리</button>
+                      <button class="btn btn-primary btn-sm" onclick="generateSpecialLecturePDF(${lecture.id}, '${selectedMonth}')">PDF</button>
                       <button class="btn btn-outline btn-sm" onclick="openEditSpecialLectureModal(${lecture.id})">수정</button>
                       <button class="btn btn-danger btn-sm" onclick="confirmDeleteSpecialLecture(${lecture.id})">삭제</button>
                     </div>

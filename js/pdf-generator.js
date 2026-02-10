@@ -103,6 +103,15 @@ function createCommissionPayslipHTML(instructor, monthKey, students, calc) {
   const today = new Date();
   const todayStr = formatDateKorean(today);
 
+  // 학생 목록 HTML 생성
+  const studentListHTML = students.map((s, i) => `
+    <tr>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 12px;">${i + 1}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 12px;">${s.name}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 12px; text-align: right;">${formatKRW(s.tuition)}</td>
+    </tr>
+  `).join('');
+
   return `
     <div id="pdfContent" style="
       width: 595px;
@@ -132,16 +141,34 @@ function createCommissionPayslipHTML(instructor, monthKey, students, calc) {
       </div>
 
       <div style="margin-bottom: 20px;">
-        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[정산 기준]</h3>
-        <p style="margin: 4px 0; font-size: 13px;">총 수강료: ${formatKRW(calc.totalTuition)} 원</p>
-        <p style="margin: 4px 0; font-size: 13px;">카드수수료 (1%): - ${formatKRW(Math.round(calc.cardFee))} 원</p>
-        <p style="margin: 4px 0; font-size: 13px;">수수료공제 후: ${formatKRW(Math.round(calc.afterCardFee))} 원</p>
-        <p style="margin: 4px 0; font-size: 13px;">강사 정산액 (${instructor.commissionRate * 100}%): ${formatKRW(Math.round(calc.instructorGross))} 원</p>
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[학생별 수강료]</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
+          <thead>
+            <tr style="background: #f5f5f5;">
+              <th style="padding: 8px; text-align: left; font-size: 12px; border-bottom: 2px solid #333; width: 40px;">번호</th>
+              <th style="padding: 8px; text-align: left; font-size: 12px; border-bottom: 2px solid #333;">학생명</th>
+              <th style="padding: 8px; text-align: right; font-size: 12px; border-bottom: 2px solid #333; width: 120px;">수강료</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${studentListHTML}
+          </tbody>
+          <tfoot>
+            <tr style="background: #f9f9f9; font-weight: bold;">
+              <td colspan="2" style="padding: 8px; font-size: 13px; border-top: 2px solid #333;">합계</td>
+              <td style="padding: 8px; text-align: right; font-size: 13px; border-top: 2px solid #333;">${formatKRW(calc.totalTuition)}</td>
+            </tr>
+          </tfoot>
+        </table>
       </div>
 
       <div style="margin-bottom: 20px;">
-        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[공제 내역]</h3>
-        <p style="margin: 4px 0; font-size: 13px;">사업소득세 (3.3%): - ${formatKRW(Math.round(calc.incomeTax))} 원</p>
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[정산 내역]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">총 수강료: ${formatKRW(calc.totalTuition)}</p>
+        <p style="margin: 4px 0; font-size: 13px;">카드수수료 (1%): - ${formatKRW(Math.round(calc.cardFee))}</p>
+        <p style="margin: 4px 0; font-size: 13px;">수수료공제 후: ${formatKRW(Math.round(calc.afterCardFee))}</p>
+        <p style="margin: 4px 0; font-size: 13px;">강사 정산액 (${instructor.commissionRate * 100}%): ${formatKRW(Math.round(calc.instructorGross))}</p>
+        <p style="margin: 4px 0; font-size: 13px;">사업소득세 (3.3%): - ${formatKRW(Math.round(calc.incomeTax))}</p>
       </div>
 
       <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
@@ -150,16 +177,16 @@ function createCommissionPayslipHTML(instructor, monthKey, students, calc) {
         <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[최종 정산]</h3>
         <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
           <span>세전정산액:</span>
-          <span>${formatKRW(Math.round(calc.instructorGross))} 원</span>
+          <span>${formatKRW(Math.round(calc.instructorGross))}</span>
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
           <span>공제액:</span>
-          <span>- ${formatKRW(Math.round(calc.totalDeduction))} 원</span>
+          <span>- ${formatKRW(Math.round(calc.totalDeduction))}</span>
         </div>
         <hr style="border: none; border-top: 1px solid #ccc; margin: 10px 0; width: 200px;">
         <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: bold; margin: 4px 0;">
           <span>실지급액:</span>
-          <span>${formatKRW(Math.round(calc.netPay))} 원</span>
+          <span>${formatKRW(Math.round(calc.netPay))}</span>
         </div>
       </div>
 
@@ -275,6 +302,254 @@ function generateCommissionPDF(instructorId, monthKey) {
 
   const html = createCommissionPayslipHTML(instructor, monthKey, students, calc);
   const fileName = `급여명세서_${instructor.name}_${year}년${month}월.pdf`;
+
+  htmlToPDF(html, fileName);
+}
+
+/**
+ * 4대보험 직원 급여명세서 HTML 생성
+ */
+function createInsurancePayslipHTML(teacher, monthKey, calc) {
+  const { year, month } = parseMonthKey(monthKey);
+  const businessName = getBusinessName(teacher.businessId);
+  const today = new Date();
+  const todayStr = formatDateKorean(today);
+
+  return `
+    <div id="pdfContent" style="
+      width: 595px;
+      padding: 40px;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: white;
+      color: #1a1a1a;
+      line-height: 1.6;
+    ">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="font-size: 24px; margin: 0 0 8px 0;">${businessName}</h1>
+        <h2 style="font-size: 18px; font-weight: 500; margin: 0; color: #666;">급여 명세서</h2>
+      </div>
+
+      <div style="font-size: 13px; margin-bottom: 20px;">
+        <p style="margin: 4px 0;">발급일: ${todayStr}</p>
+        <p style="margin: 4px 0;">정산월: ${year}년 ${month}월</p>
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[직원 정보]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">이름: ${teacher.name}</p>
+        <p style="margin: 4px 0; font-size: 13px;">직급: ${teacher.position || '4대보험 직원'}</p>
+        <p style="margin: 4px 0; font-size: 13px;">입사일: ${teacher.hireDate || '-'}</p>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[급여 내역]</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9; font-weight: bold;">기본급</td>
+            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${formatKRW(calc.monthlySalary)}</td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[공제 내역]</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead>
+            <tr style="background: #f5f5f5;">
+              <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">항목</th>
+              <th style="padding: 8px; text-align: center; border: 1px solid #ddd;">비율</th>
+              <th style="padding: 8px; text-align: right; border: 1px solid #ddd;">금액</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${calc.breakdown.map(item => `
+              <tr>
+                <td style="padding: 8px; border: 1px solid #ddd;">${item.name}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: center; color: #666;">${item.rate}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: right; color: #c00;">-${formatKRW(item.amount)}</td>
+              </tr>
+            `).join('')}
+            <tr style="background: #f9f9f9; font-weight: bold;">
+              <td colspan="2" style="padding: 8px; border: 1px solid #ddd;">공제액 계</td>
+              <td style="padding: 8px; border: 1px solid #ddd; text-align: right; color: #c00;">-${formatKRW(calc.totalDeduction)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
+
+      <div style="margin-bottom: 30px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[정산 요약]</h3>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
+          <span>지급액 계:</span>
+          <span>${formatKRW(calc.monthlySalary)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
+          <span>공제액 계:</span>
+          <span>- ${formatKRW(calc.totalDeduction)}</span>
+        </div>
+        <hr style="border: none; border-top: 1px solid #ccc; margin: 10px 0; width: 200px; margin-left: auto;">
+        <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; margin: 4px 0;">
+          <span>실지급액:</span>
+          <span>${formatKRW(calc.netPay)}</span>
+        </div>
+      </div>
+
+      <div style="text-align: center; font-size: 12px; color: #666; margin-top: 40px;">
+        귀하의 노고에 감사드립니다.
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * 4대보험 직원 급여명세서 PDF 생성
+ */
+function generateInsurancePDF(teacherId, monthKey) {
+  const teacher = getInsuranceTeacherById(teacherId);
+  if (!teacher) {
+    showToast('직원 정보를 찾을 수 없습니다.');
+    return;
+  }
+
+  const calc = calculateInsuranceDeduction(teacher.monthlySalary);
+  const { year, month } = parseMonthKey(monthKey);
+
+  const html = createInsurancePayslipHTML(teacher, monthKey, calc);
+  const fileName = `급여명세서_${teacher.name}_${year}년${month}월.pdf`;
+
+  htmlToPDF(html, fileName);
+}
+
+/**
+ * 특강 정산 명세서 HTML 생성
+ */
+function createSpecialLecturePayslipHTML(lecture, monthKey, students, calc) {
+  const { year, month } = parseMonthKey(monthKey);
+  const businessName = getBusinessName(lecture.businessId);
+  const today = new Date();
+  const todayStr = formatDateKorean(today);
+
+  // 학생 목록 HTML 생성
+  const studentListHTML = students.map((s, i) => `
+    <tr>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 12px;">${i + 1}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 12px;">${s.name}</td>
+      <td style="padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 12px; text-align: right;">${formatKRW(s.tuition)}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div id="pdfContent" style="
+      width: 595px;
+      padding: 40px;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: white;
+      color: #1a1a1a;
+      line-height: 1.6;
+    ">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="font-size: 24px; margin: 0 0 8px 0;">${businessName}</h1>
+        <h2 style="font-size: 18px; font-weight: 500; margin: 0; color: #666;">특강 정산 명세서</h2>
+      </div>
+
+      <div style="font-size: 13px; margin-bottom: 20px;">
+        <p style="margin: 4px 0;">발급일: ${todayStr}</p>
+        <p style="margin: 4px 0;">정산월: ${year}년 ${month}월</p>
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[특강 정보]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">특강명: ${lecture.name}</p>
+        <p style="margin: 4px 0; font-size: 13px;">과목: ${lecture.subject || '-'}</p>
+        <p style="margin: 4px 0; font-size: 13px;">강사: ${lecture.instructorName}</p>
+        <p style="margin: 4px 0; font-size: 13px;">정산비율: ${Math.round(lecture.commissionRate * 100)}%</p>
+        <p style="margin: 4px 0; font-size: 13px;">수강생: ${students.length}명</p>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[학생별 수강료]</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 8px;">
+          <thead>
+            <tr style="background: #f5f5f5;">
+              <th style="padding: 8px; text-align: left; font-size: 12px; border-bottom: 2px solid #333; width: 40px;">번호</th>
+              <th style="padding: 8px; text-align: left; font-size: 12px; border-bottom: 2px solid #333;">학생명</th>
+              <th style="padding: 8px; text-align: right; font-size: 12px; border-bottom: 2px solid #333; width: 120px;">수강료</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${studentListHTML}
+          </tbody>
+          <tfoot>
+            <tr style="background: #f9f9f9; font-weight: bold;">
+              <td colspan="2" style="padding: 8px; font-size: 13px; border-top: 2px solid #333;">합계</td>
+              <td style="padding: 8px; text-align: right; font-size: 13px; border-top: 2px solid #333;">${formatKRW(calc.totalTuition)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[정산 내역]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">총 수강료: ${formatKRW(calc.totalTuition)}</p>
+        <p style="margin: 4px 0; font-size: 13px;">카드수수료 (1%): - ${formatKRW(calc.cardFee)}</p>
+        <p style="margin: 4px 0; font-size: 13px;">수수료공제 후: ${formatKRW(calc.afterCardFee)}</p>
+        <p style="margin: 4px 0; font-size: 13px;">강사 정산액 (${Math.round(lecture.commissionRate * 100)}%): ${formatKRW(calc.instructorGross)}</p>
+        <p style="margin: 4px 0; font-size: 13px;">사업소득세 (3.3%): - ${formatKRW(calc.incomeTax)}</p>
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
+
+      <div style="margin-bottom: 30px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[최종 정산]</h3>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
+          <span>세전정산액:</span>
+          <span>${formatKRW(calc.instructorGross)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
+          <span>공제액:</span>
+          <span>- ${formatKRW(calc.incomeTax)}</span>
+        </div>
+        <hr style="border: none; border-top: 1px solid #ccc; margin: 10px 0; width: 200px; margin-left: auto;">
+        <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; margin: 4px 0;">
+          <span>실지급액:</span>
+          <span>${formatKRW(calc.netPay)}</span>
+        </div>
+      </div>
+
+      <div style="text-align: center; font-size: 12px; color: #666; margin-top: 40px;">
+        귀하의 노고에 감사드립니다.
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * 특강 정산 명세서 PDF 생성
+ */
+function generateSpecialLecturePDF(lectureId, monthKey) {
+  const lecture = getSpecialLectureById(lectureId);
+  if (!lecture) {
+    showToast('특강 정보를 찾을 수 없습니다.');
+    return;
+  }
+
+  const students = getSpecialLectureStudents(lectureId, monthKey);
+  if (students.length === 0) {
+    showToast('해당 월의 수강생이 없습니다.');
+    return;
+  }
+
+  const calc = calculateSpecialLecture(lecture, students, appData.settings);
+  const { year, month } = parseMonthKey(monthKey);
+
+  const html = createSpecialLecturePayslipHTML(lecture, monthKey, students, calc);
+  const fileName = `특강정산_${lecture.name}_${lecture.instructorName}_${year}년${month}월.pdf`;
 
   htmlToPDF(html, fileName);
 }

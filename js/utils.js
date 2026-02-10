@@ -116,7 +116,36 @@ const INSURANCE_RATES = {
 };
 
 /**
- * 4대보험 공제액 계산
+ * 근로소득 간이세액표 (2026년 기준, 부양가족 1인 본인)
+ * 실제 세액표 기반
+ */
+function getIncomeTax(monthlySalary) {
+  // 2026년 간이세액표 (부양가족 1인 기준) - 실제 값
+  const taxTable = [
+    { min: 0, max: 1060000, tax: 0 },
+    { min: 1060000, max: 1500000, tax: 15000 },
+    { min: 1500000, max: 2000000, tax: 26000 },
+    { min: 2000000, max: 2500000, tax: 35600 },
+    { min: 2500000, max: 3000000, tax: 58990 },
+    { min: 3000000, max: 3500000, tax: 85540 },
+    { min: 3500000, max: 4000000, tax: 122170 },
+    { min: 4000000, max: 5000000, tax: 176040 },
+    { min: 5000000, max: 6000000, tax: 257040 },
+    { min: 6000000, max: 7000000, tax: 340370 },
+    { min: 7000000, max: Infinity, tax: 450000 }
+  ];
+
+  // 해당 구간의 세액 반환
+  for (let i = taxTable.length - 1; i >= 0; i--) {
+    if (monthlySalary > taxTable[i].min) {
+      return taxTable[i].tax;
+    }
+  }
+  return 0;
+}
+
+/**
+ * 4대보험 + 소득세 공제액 계산
  */
 function calculateInsuranceDeduction(monthlySalary) {
   // 국민연금
@@ -131,8 +160,14 @@ function calculateInsuranceDeduction(monthlySalary) {
   // 고용보험
   const employmentInsurance = Math.round(monthlySalary * INSURANCE_RATES.employmentInsurance);
 
+  // 소득세 (간이세액표 기준)
+  const incomeTax = getIncomeTax(monthlySalary);
+
+  // 지방소득세 (소득세의 10%)
+  const localIncomeTax = Math.round(incomeTax * 0.1);
+
   // 총 공제액
-  const totalDeduction = nationalPension + healthInsurance + longTermCare + employmentInsurance;
+  const totalDeduction = nationalPension + healthInsurance + longTermCare + employmentInsurance + incomeTax + localIncomeTax;
 
   // 실지급액
   const netPay = monthlySalary - totalDeduction;
@@ -143,13 +178,17 @@ function calculateInsuranceDeduction(monthlySalary) {
     healthInsurance,
     longTermCare,
     employmentInsurance,
+    incomeTax,
+    localIncomeTax,
     totalDeduction,
     netPay,
     breakdown: [
       { name: '국민연금', amount: nationalPension, rate: '4.75%' },
       { name: '건강보험', amount: healthInsurance, rate: '3.595%' },
       { name: '장기요양', amount: longTermCare, rate: '건강보험의 13.14%' },
-      { name: '고용보험', amount: employmentInsurance, rate: '0.9%' }
+      { name: '고용보험', amount: employmentInsurance, rate: '0.9%' },
+      { name: '소득세', amount: incomeTax, rate: '간이세액' },
+      { name: '지방소득세', amount: localIncomeTax, rate: '소득세의 10%' }
     ]
   };
 }
