@@ -864,10 +864,18 @@ function openStudentManagement(instructorId) {
         </div>
       ` : ''}
 
+      ${students.length > 0 ? `
+      <div style="margin-bottom: 0.5rem; display: flex; gap: 0.5rem; align-items: center;">
+        <button class="btn btn-danger btn-sm" onclick="deleteSelectedCommissionStudents(${instructorId})">선택 삭제</button>
+        <span id="selectedCount_${instructorId}" style="font-size: 0.8125rem; color: var(--text-light);">0명 선택</span>
+      </div>
+      ` : ''}
+
       <div class="table-container">
         <table>
           <thead>
             <tr>
+              <th style="width: 40px;"><input type="checkbox" id="selectAll_${instructorId}" onchange="toggleAllCommissionStudents(${instructorId})"></th>
               <th>학생명</th>
               <th>수강료</th>
               <th>관리</th>
@@ -876,6 +884,7 @@ function openStudentManagement(instructorId) {
           <tbody>
             ${students.length > 0 ? students.map(student => `
               <tr>
+                <td><input type="checkbox" class="student-checkbox-${instructorId}" data-student-id="${student.id}" onchange="updateSelectedCount(${instructorId})"></td>
                 <td>${student.name}</td>
                 <td>${formatKRW(student.tuition)}</td>
                 <td>
@@ -885,7 +894,7 @@ function openStudentManagement(instructorId) {
                   </div>
                 </td>
               </tr>
-            `).join('') : '<tr><td colspan="3" class="empty-state">등록된 학생이 없습니다. Excel 업로드 또는 직접 추가해주세요.</td></tr>'}
+            `).join('') : '<tr><td colspan="4" class="empty-state">등록된 학생이 없습니다. Excel 업로드 또는 직접 추가해주세요.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -1004,6 +1013,49 @@ function confirmDeleteStudent(instructorId, studentId) {
     openStudentManagement(instructorId);
     showToast('학생이 삭제되었습니다.');
   }
+}
+
+// 비율제 강사 - 체크박스 전체 선택/해제
+function toggleAllCommissionStudents(instructorId) {
+  const selectAll = document.getElementById(`selectAll_${instructorId}`);
+  const checkboxes = document.querySelectorAll(`.student-checkbox-${instructorId}`);
+  checkboxes.forEach(cb => cb.checked = selectAll.checked);
+  updateSelectedCount(instructorId);
+}
+
+// 비율제 강사 - 선택된 학생 수 업데이트
+function updateSelectedCount(instructorId) {
+  const checkboxes = document.querySelectorAll(`.student-checkbox-${instructorId}:checked`);
+  const countSpan = document.getElementById(`selectedCount_${instructorId}`);
+  if (countSpan) {
+    countSpan.textContent = `${checkboxes.length}명 선택`;
+  }
+  // 전체 선택 체크박스 상태 업데이트
+  const allCheckboxes = document.querySelectorAll(`.student-checkbox-${instructorId}`);
+  const selectAll = document.getElementById(`selectAll_${instructorId}`);
+  if (selectAll) {
+    selectAll.checked = allCheckboxes.length > 0 && checkboxes.length === allCheckboxes.length;
+  }
+}
+
+// 비율제 강사 - 선택된 학생 삭제
+function deleteSelectedCommissionStudents(instructorId) {
+  const checkboxes = document.querySelectorAll(`.student-checkbox-${instructorId}:checked`);
+  if (checkboxes.length === 0) {
+    alert('삭제할 학생을 선택해주세요.');
+    return;
+  }
+
+  if (!confirm(`선택한 ${checkboxes.length}명의 학생을 삭제하시겠습니까?`)) {
+    return;
+  }
+
+  const studentIds = Array.from(checkboxes).map(cb => parseInt(cb.dataset.studentId));
+  const students = getCommissionStudents(instructorId, selectedMonth);
+  const remaining = students.filter(s => !studentIds.includes(s.id));
+  setCommissionStudents(instructorId, selectedMonth, remaining);
+  openStudentManagement(instructorId);
+  showToast(`${checkboxes.length}명의 학생이 삭제되었습니다.`);
 }
 
 // ============ 근무기록 ============
@@ -2946,10 +2998,18 @@ function openSpecialLectureStudentManagement(lectureId) {
         </div>
       ` : ''}
 
+      ${students.length > 0 ? `
+      <div style="margin-bottom: 0.5rem; display: flex; gap: 0.5rem; align-items: center;">
+        <button class="btn btn-danger btn-sm" onclick="deleteSelectedSpecialLectureStudents(${lectureId})">선택 삭제</button>
+        <span id="selectedSpecialCount_${lectureId}" style="font-size: 0.8125rem; color: var(--text-light);">0명 선택</span>
+      </div>
+      ` : ''}
+
       <div class="table-container">
         <table>
           <thead>
             <tr>
+              <th style="width: 40px;"><input type="checkbox" id="selectAllSpecial_${lectureId}" onchange="toggleAllSpecialLectureStudents(${lectureId})"></th>
               <th>학생명</th>
               <th>수강료</th>
               <th>관리</th>
@@ -2958,6 +3018,7 @@ function openSpecialLectureStudentManagement(lectureId) {
           <tbody>
             ${students.length > 0 ? students.map(student => `
               <tr>
+                <td><input type="checkbox" class="special-student-checkbox-${lectureId}" data-student-id="${student.id}" onchange="updateSpecialSelectedCount(${lectureId})"></td>
                 <td>${student.name}</td>
                 <td>${formatKRW(student.tuition)}</td>
                 <td>
@@ -2967,7 +3028,7 @@ function openSpecialLectureStudentManagement(lectureId) {
                   </div>
                 </td>
               </tr>
-            `).join('') : '<tr><td colspan="3" class="empty-state">등록된 학생이 없습니다.</td></tr>'}
+            `).join('') : '<tr><td colspan="4" class="empty-state">등록된 학생이 없습니다.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -3177,6 +3238,50 @@ function confirmDeleteSpecialLectureStudent(lectureId, studentId) {
     openSpecialLectureStudentManagement(lectureId);
     showToast('학생이 삭제되었습니다.');
   }
+}
+
+// 특강 - 체크박스 전체 선택/해제
+function toggleAllSpecialLectureStudents(lectureId) {
+  const selectAll = document.getElementById(`selectAllSpecial_${lectureId}`);
+  const checkboxes = document.querySelectorAll(`.special-student-checkbox-${lectureId}`);
+  checkboxes.forEach(cb => cb.checked = selectAll.checked);
+  updateSpecialSelectedCount(lectureId);
+}
+
+// 특강 - 선택된 학생 수 업데이트
+function updateSpecialSelectedCount(lectureId) {
+  const checkboxes = document.querySelectorAll(`.special-student-checkbox-${lectureId}:checked`);
+  const countSpan = document.getElementById(`selectedSpecialCount_${lectureId}`);
+  if (countSpan) {
+    countSpan.textContent = `${checkboxes.length}명 선택`;
+  }
+  // 전체 선택 체크박스 상태 업데이트
+  const allCheckboxes = document.querySelectorAll(`.special-student-checkbox-${lectureId}`);
+  const selectAll = document.getElementById(`selectAllSpecial_${lectureId}`);
+  if (selectAll) {
+    selectAll.checked = allCheckboxes.length > 0 && checkboxes.length === allCheckboxes.length;
+  }
+}
+
+// 특강 - 선택된 학생 삭제
+function deleteSelectedSpecialLectureStudents(lectureId) {
+  const checkboxes = document.querySelectorAll(`.special-student-checkbox-${lectureId}:checked`);
+  if (checkboxes.length === 0) {
+    alert('삭제할 학생을 선택해주세요.');
+    return;
+  }
+
+  if (!confirm(`선택한 ${checkboxes.length}명의 학생을 삭제하시겠습니까?`)) {
+    return;
+  }
+
+  const studentIds = Array.from(checkboxes).map(cb => parseInt(cb.dataset.studentId));
+  const students = getSpecialLectureStudents(lectureId, selectedMonth);
+  const remaining = students.filter(s => !studentIds.includes(s.id));
+  setSpecialLectureStudents(lectureId, selectedMonth, remaining);
+  renderContent();
+  openSpecialLectureStudentManagement(lectureId);
+  showToast(`${checkboxes.length}명의 학생이 삭제되었습니다.`);
 }
 
 function handleSpecialLectureExcelUpload(input, lectureId) {
