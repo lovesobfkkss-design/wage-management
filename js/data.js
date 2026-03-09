@@ -45,6 +45,8 @@ function getDefaultData() {
     commissionStudents: [],
     // 4대보험 직원 (월급제)
     insuranceTeachers: [],
+    // 4대보험 직원 결근 데이터 (월별)
+    insuranceAbsences: [],
     // 특강 목록
     specialLectures: [],
     // 특강 학생 데이터 (월별)
@@ -69,6 +71,7 @@ function ensureDataCompatibility(data) {
   if (!data.commissionStudents) data.commissionStudents = [];
   if (!data.workLogs) data.workLogs = [];
   if (!data.workLogHistories) data.workLogHistories = [];
+  if (!data.insuranceAbsences) data.insuranceAbsences = [];
   if (!data.settings) data.settings = getDefaultData().settings;
   if (data.settings.cardFeeRate === undefined) data.settings.cardFeeRate = 0.01;
 
@@ -477,6 +480,29 @@ function getInsuranceTeachersByBusiness(businessId) {
 // 4대보험 직원 조회
 function getInsuranceTeacherById(id) {
   return appData.insuranceTeachers.find(t => t.id === id);
+}
+
+function getInsuranceAbsenceDays(teacherId, monthKey) {
+  const record = appData.insuranceAbsences.find(item => item.teacherId === teacherId && item.monthKey === monthKey);
+  return record ? record.absentDays : 0;
+}
+
+function setInsuranceAbsenceDays(teacherId, monthKey, absentDays) {
+  const index = appData.insuranceAbsences.findIndex(item => item.teacherId === teacherId && item.monthKey === monthKey);
+  const normalizedDays = Math.max(0, parseInt(absentDays, 10) || 0);
+
+  if (index >= 0) {
+    appData.insuranceAbsences[index].absentDays = normalizedDays;
+  } else {
+    appData.insuranceAbsences.push({
+      teacherId,
+      monthKey,
+      absentDays: normalizedDays
+    });
+  }
+
+  saveData(appData);
+  return normalizedDays;
 }
 
 // 4대보험 직원 추가

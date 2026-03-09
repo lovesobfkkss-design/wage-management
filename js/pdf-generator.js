@@ -350,6 +350,10 @@ function createInsurancePayslipHTML(teacher, monthKey, calc) {
             <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9; font-weight: bold;">기본급</td>
             <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${formatKRW(calc.monthlySalary)}</td>
           </tr>
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9; font-weight: bold;">결근 공제</td>
+            <td style="padding: 8px; border: 1px solid #ddd; text-align: right; color: #c00;">-${formatKRW(calc.absenceDeduction)} (${calc.absentDays}일)</td>
+          </tr>
         </table>
       </div>
 
@@ -388,13 +392,17 @@ function createInsurancePayslipHTML(teacher, monthKey, calc) {
           <span>${formatKRW(calc.monthlySalary)}</span>
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
-          <span>공제액 계:</span>
+          <span>결근 공제:</span>
+          <span>- ${formatKRW(calc.absenceDeduction)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
+          <span>4대보험/세금 공제액 계:</span>
           <span>- ${formatKRW(calc.totalDeduction)}</span>
         </div>
         <hr style="border: none; border-top: 1px solid #ccc; margin: 10px 0; width: 200px; margin-left: auto;">
         <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; margin: 4px 0;">
           <span>실지급액:</span>
-          <span>${formatKRW(calc.netPay)}</span>
+          <span>${formatKRW(calc.finalNetPay)}</span>
         </div>
       </div>
 
@@ -415,7 +423,8 @@ function generateInsurancePDF(teacherId, monthKey) {
     return;
   }
 
-  const calc = calculateInsuranceDeduction(teacher.monthlySalary);
+  const absentDays = getInsuranceAbsenceDays(teacherId, monthKey);
+  const calc = calculateInsurancePayroll(teacher.monthlySalary, absentDays);
   const { year, month } = parseMonthKey(monthKey);
 
   const html = createInsurancePayslipHTML(teacher, monthKey, calc);

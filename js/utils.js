@@ -193,6 +193,21 @@ function calculateInsuranceDeduction(monthlySalary) {
   };
 }
 
+function calculateInsurancePayroll(monthlySalary, absentDays = 0) {
+  const insurance = calculateInsuranceDeduction(monthlySalary);
+  const normalizedAbsentDays = Math.max(0, parseInt(absentDays, 10) || 0);
+  const dailyDeduction = Math.round(monthlySalary / 28);
+  const absenceDeduction = dailyDeduction * normalizedAbsentDays;
+
+  return {
+    ...insurance,
+    absentDays: normalizedAbsentDays,
+    dailyDeduction,
+    absenceDeduction,
+    finalNetPay: monthlySalary - absenceDeduction - insurance.totalDeduction
+  };
+}
+
 // ============ 비율제 강사 정산 계산 ============
 
 /**
@@ -608,12 +623,15 @@ function generateInsuranceMessage(teacher, monthKey, calc) {
   message += `${teacher.name}님, ${month}월 급여 정산 내역 공유드립니다.\n\n`;
 
   message += `• 월 급여: ${formatKRW(calc.monthlySalary)}\n\n`;
+  if (calc.absentDays > 0) {
+    message += `• 결근 ${calc.absentDays}일 공제: -${formatKRW(calc.absenceDeduction)}\n\n`;
+  }
   message += `[4대보험 공제 내역]\n`;
   calc.breakdown.forEach(item => {
     message += `• ${item.name} (${item.rate}): -${formatKRW(item.amount)}\n`;
   });
   message += `\n총 공제액: -${formatKRW(calc.totalDeduction)}\n`;
-  message += `→ 최종 지급예정액: ${formatKRW(calc.netPay)}\n\n`;
+  message += `→ 최종 지급예정액: ${formatKRW(calc.finalNetPay)}\n\n`;
   message += `맞는지 확인 후 답변 부탁드립니다.`;
 
   return message;

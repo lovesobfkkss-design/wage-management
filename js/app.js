@@ -1428,6 +1428,231 @@ function openWorkLogHistoryModal(logId) {
   openModal();
 }
 
+function openPayrollWorkLogModal(staffId) {
+  const staff = getStaffById(staffId);
+  if (!staff) {
+    showToast('직원 정보를 찾을 수 없습니다.');
+    return;
+  }
+
+  const logs = getStaffWorkLogs(staffId, selectedMonth)
+    .slice()
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
+
+  document.getElementById('modalTitle').textContent = `${staff.name} 근무시간 수정`;
+  document.getElementById('modalBody').innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
+      <div>
+        <strong>${selectedMonth} 근무기록</strong>
+        <div style="font-size: 0.875rem; color: var(--text-light); margin-top: 0.25rem;">총 ${formatHours(totalHours)}</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openAddPayrollWorkLogModal(${staffId})">+ 근무 추가</button>
+    </div>
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>날짜</th>
+            <th>출근</th>
+            <th>퇴근</th>
+            <th>휴게</th>
+            <th>근무시간</th>
+            <th>메모</th>
+            <th>관리</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${logs.map(log => `
+            <tr>
+              <td>${log.date}</td>
+              <td>${log.startTime || '-'}</td>
+              <td>${log.endTime || '-'}</td>
+              <td>${log.breakMinutes || 0}분</td>
+              <td>${formatHours(log.hours)}</td>
+              <td style="font-size: 0.8125rem; color: var(--text-light);">${log.memo || ''}</td>
+              <td>
+                <div class="actions">
+                  <button class="btn btn-accent btn-sm" onclick="openWorkLogHistoryModal(${log.id})">이력</button>
+                  <button class="btn btn-outline btn-sm" onclick="openEditPayrollWorkLogModal(${log.id}, ${staffId})">수정</button>
+                  <button class="btn btn-danger btn-sm" onclick="confirmDeletePayrollWorkLog(${log.id}, ${staffId})">삭제</button>
+                </div>
+              </td>
+            </tr>
+          `).join('') || '<tr><td colspan="7" class="empty-state">이 달의 근무기록이 없습니다.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">닫기</button>
+  `;
+  openModal();
+}
+
+function openAddPayrollWorkLogModal(staffId) {
+  const staff = getStaffById(staffId);
+  if (!staff) {
+    showToast('직원 정보를 찾을 수 없습니다.');
+    return;
+  }
+
+  document.getElementById('modalTitle').textContent = `${staff.name} 근무기록 추가`;
+  document.getElementById('modalBody').innerHTML = getWorkLogFormHTML({ staffId, date: `${selectedMonth}-01` });
+  const staffSelect = document.getElementById('logStaff');
+  if (staffSelect) {
+    staffSelect.value = String(staffId);
+    staffSelect.disabled = true;
+  }
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="openPayrollWorkLogModal(${staffId})">목록으로</button>
+    <button class="btn btn-primary" onclick="saveNewPayrollWorkLog(${staffId})">저장</button>
+  `;
+  openModal();
+}
+
+function saveNewPayrollWorkLog(staffId) {
+  const staff = getStaffById(staffId);
+  const date = document.getElementById('logDate').value;
+  const startTime = document.getElementById('logStart').value;
+  const endTime = document.getElementById('logEnd').value;
+  const breakMinutes = parseInt(document.getElementById('logBreak').value) || 0;
+  let hours = parseFloat(document.getElementById('logHours').value);
+
+  if (!date) {
+    alert('날짜를 입력해주세요.');
+    return;
+  }
+
+  if (date.slice(0, 7) !== selectedMonth) {
+    alert('선택한 정산 월의 날짜만 추가할 수 있습니다.');
+    return;
+  }
+
+  if (isNaN(hours) && startTime && endTime) {
+    hours = calculateHours(startTime, endTime, breakMinutes, staff?.roundingRule || 'exact');
+  }
+
+  if (isNaN(hours) || hours <= 0) {
+    alert('근무시간을 입력해주세요.');
+    return;
+  }
+
+  addWorkLog({
+    staffId,
+    date,
+    startTime,
+    endTime,
+    breakMinutes,
+    hours,
+    memo: document.getElementById('logMemo').value.trim()
+  });
+
+  renderContent();
+  openPayrollWorkLogModal(staffId);
+  showToast('근무기록이 추가되었습니다.');
+}
+
+function openEditPayrollWorkLogModal(logId, staffId) {
+  const log = getWorkLogById(logId);
+  if (!log) {
+    showToast('근무기록을 찾을 수 없습니다.');
+    return;
+  }
+
+  document.getElementById('modalTitle').textContent = '근무기록 수정';
+  document.getElementById('modalBody').innerHTML = getWorkLogFormHTML(log);
+  const staffSelect = document.getElementById('logStaff');
+  if (staffSelect) {
+    staffSelect.value = String(log.staffId);
+  }
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="openPayrollWorkLogModal(${staffId})">목록으로</button>
+    <button class="btn btn-primary" onclick="saveEditPayrollWorkLog(${logId}, ${staffId})">저장</button>
+  `;
+  openModal();
+}
+
+function saveEditPayrollWorkLog(logId, staffId) {
+  const existingLog = getWorkLogById(logId);
+  if (!existingLog) {
+    showToast('근무기록을 찾을 수 없습니다.');
+    return;
+  }
+
+  const staff = getStaffById(staffId);
+  const date = document.getElementById('logDate').value;
+  const startTime = document.getElementById('logStart').value;
+  const endTime = document.getElementById('logEnd').value;
+  const breakMinutes = parseInt(document.getElementById('logBreak').value) || 0;
+  let hours = parseFloat(document.getElementById('logHours').value);
+
+  if (!date) {
+    alert('날짜를 입력해주세요.');
+    return;
+  }
+
+  if (date.slice(0, 7) !== selectedMonth) {
+    alert('선택한 정산 월의 날짜만 수정할 수 있습니다.');
+    return;
+  }
+
+  if (isNaN(hours) && startTime && endTime) {
+    hours = calculateHours(startTime, endTime, breakMinutes, staff?.roundingRule || 'exact');
+  }
+
+  if (isNaN(hours) || hours <= 0) {
+    alert('근무시간을 입력해주세요.');
+    return;
+  }
+
+  const nextLog = {
+    staffId,
+    date,
+    startTime,
+    endTime,
+    breakMinutes,
+    hours,
+    memo: document.getElementById('logMemo').value.trim()
+  };
+
+  if (!hasWorkLogChanges(existingLog, nextLog)) {
+    openPayrollWorkLogModal(staffId);
+    showToast('변경된 내용이 없습니다.');
+    return;
+  }
+
+  const historyReason = document.getElementById('logEditReason')?.value.trim() || '';
+  updateWorkLog(logId, {
+    ...nextLog,
+    modifiedAt: new Date().toISOString(),
+    modifiedByType: 'admin',
+    modifiedByName: '관리자',
+    historyEntry: {
+      editedByType: 'admin',
+      editedById: null,
+      editedByName: '관리자',
+      editedAt: new Date().toISOString(),
+      reason: historyReason
+    }
+  });
+
+  renderContent();
+  openPayrollWorkLogModal(staffId);
+  showToast('근무기록이 수정되었습니다.');
+}
+
+function confirmDeletePayrollWorkLog(logId, staffId) {
+  if (!confirm('이 근무기록을 삭제하시겠습니까?')) {
+    return;
+  }
+
+  deleteWorkLog(logId);
+  renderContent();
+  openPayrollWorkLogModal(staffId);
+  showToast('근무기록이 삭제되었습니다.');
+}
+
 function confirmDeleteWorkLog(logId) {
   if (confirm('정말 삭제하시겠습니까?')) {
     deleteWorkLog(logId);
@@ -1522,7 +1747,7 @@ function renderPayroll(container) {
               <th>세전</th>
               <th>공제</th>
               <th>실지급</th>
-              <th>명세서</th>
+              <th>관리</th>
             </tr>
           </thead>
           <tbody>
@@ -1544,6 +1769,7 @@ function renderPayroll(container) {
                   </td>
                   <td><strong style="color: var(--success);">${formatKRW(ded.netPay)}</strong></td>
                   <td>
+                    <button class="btn btn-accent btn-sm" onclick="openPayrollWorkLogModal(${staff.id})">시간수정</button>
                     <button class="btn btn-outline btn-sm" onclick="showPayslip(${staff.id})">보기</button>
                     <button class="btn btn-primary btn-sm" onclick="generateStaffPayrollPDF(${staff.id}, '${selectedMonth}')">PDF</button>
                   </td>
@@ -2619,6 +2845,7 @@ let showTerminatedInsurance = false;
 
 function renderInsuranceTeachers(container) {
   const allTeachers = getInsuranceTeachersByBusiness(selectedBusiness);
+  const { year, month } = parseMonthKey(selectedMonth);
 
   // 퇴사자 필터링
   const activeTeachers = allTeachers.filter(t => !t.terminationDate);
@@ -2627,8 +2854,11 @@ function renderInsuranceTeachers(container) {
 
   container.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-      <h2 style="color: var(--primary);">4대보험 직원 관리</h2>
+      <h2 style="color: var(--primary);">${year}년 ${month}월 4대보험 직원 관리</h2>
       <div style="display: flex; gap: 1rem; align-items: center;">
+        <div class="month-selector">
+          <input type="month" value="${selectedMonth}" onchange="changeMonth(this.value)">
+        </div>
         ${terminatedTeachers.length > 0 ? `
           <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text-light); cursor: pointer;">
             <input type="checkbox" ${showTerminatedInsurance ? 'checked' : ''} onchange="toggleTerminatedInsurance(this.checked)">
@@ -2651,6 +2881,8 @@ function renderInsuranceTeachers(container) {
               <th>소속</th>
               <th>직급</th>
               <th>월급여</th>
+              <th>결근일수</th>
+              <th>결근공제</th>
               <th>4대보험 공제</th>
               <th>실지급액</th>
               <th>입사일</th>
@@ -2662,7 +2894,8 @@ function renderInsuranceTeachers(container) {
               const isTerminated = !!teacher.terminationDate;
               const rowStyle = isTerminated ? 'background: #fafafa; opacity: 0.7;' : '';
               const nameStyle = isTerminated ? 'text-decoration: line-through; color: var(--text-light);' : '';
-              const calc = calculateInsuranceDeduction(teacher.monthlySalary);
+              const absentDays = getInsuranceAbsenceDays(teacher.id, selectedMonth);
+              const calc = calculateInsurancePayroll(teacher.monthlySalary, absentDays);
               const businessName = getBusinessName(teacher.businessId);
 
               return `
@@ -2674,8 +2907,20 @@ function renderInsuranceTeachers(container) {
                   <td><span class="badge badge-business">${businessName}</span></td>
                   <td>${teacher.position || '-'}</td>
                   <td>${formatKRW(teacher.monthlySalary)}</td>
+                  <td>
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      value="${absentDays}"
+                      class="form-input"
+                      style="width: 90px; min-width: 90px;"
+                      onchange="updateInsuranceAbsenceDays(${teacher.id}, this.value)"
+                    >
+                  </td>
+                  <td style="color: var(--danger);">-${formatKRW(calc.absenceDeduction)}</td>
                   <td style="color: var(--danger);">-${formatKRW(calc.totalDeduction)}</td>
-                  <td><strong style="color: var(--success);">${formatKRW(calc.netPay)}</strong></td>
+                  <td><strong style="color: var(--success);">${formatKRW(calc.finalNetPay)}</strong></td>
                   <td style="font-size: 0.8125rem;">${teacher.hireDate || '-'}</td>
                   <td>
                     <div class="actions">
@@ -2687,12 +2932,19 @@ function renderInsuranceTeachers(container) {
                   </td>
                 </tr>
               `;
-            }).join('') : '<tr><td colspan="8" class="empty-state">등록된 4대보험 직원이 없습니다.</td></tr>'}
+            }).join('') : '<tr><td colspan="10" class="empty-state">등록된 4대보험 직원이 없습니다.</td></tr>'}
           </tbody>
         </table>
       </div>
     </div>
   `;
+}
+
+function updateInsuranceAbsenceDays(teacherId, value) {
+  const absentDays = Math.max(0, parseInt(value, 10) || 0);
+  setInsuranceAbsenceDays(teacherId, selectedMonth, absentDays);
+  renderContent();
+  showToast('결근일수가 저장되었습니다.');
 }
 
 function toggleTerminatedInsurance(show) {
@@ -2859,7 +3111,8 @@ function saveEditInsuranceTeacher(id) {
 
 function showInsuranceDetailModal(id) {
   const teacher = getInsuranceTeacherById(id);
-  const calc = calculateInsuranceDeduction(teacher.monthlySalary);
+  const absentDays = getInsuranceAbsenceDays(id, selectedMonth);
+  const calc = calculateInsurancePayroll(teacher.monthlySalary, absentDays);
 
   document.getElementById('modalTitle').textContent = `${teacher.name} 4대보험 상세`;
   document.getElementById('modalBody').innerHTML = `
@@ -2868,15 +3121,30 @@ function showInsuranceDetailModal(id) {
         <div class="summary-label" style="color: var(--text-light);">월 급여 (세전)</div>
         <div class="summary-value" style="font-size: 1.25rem;">${formatKRW(calc.monthlySalary)}</div>
       </div>
+      <div class="summary-card">
+        <div class="summary-label" style="color: var(--text-light);">결근 공제</div>
+        <div class="summary-value" style="font-size: 1.25rem; color: var(--danger);">-${formatKRW(calc.absenceDeduction)}</div>
+        <div class="summary-sub">${calc.absentDays}일 x ${formatKRW(calc.dailyDeduction)}</div>
+      </div>
       <div class="summary-card primary">
         <div class="summary-label">실지급액</div>
-        <div class="summary-value" style="font-size: 1.25rem;">${formatKRW(calc.netPay)}</div>
+        <div class="summary-value" style="font-size: 1.25rem;">${formatKRW(calc.finalNetPay)}</div>
       </div>
+    </div>
+
+    <div style="margin-bottom: 1rem; padding: 1rem; background: var(--bg); border-radius: 8px;">
+      <strong>${selectedMonth} 결근 정보</strong>
+      <div style="margin-top: 0.5rem; color: var(--text-light);">결근 ${calc.absentDays}일, 1일 공제액 ${formatKRW(calc.dailyDeduction)}</div>
     </div>
 
     <h4 style="margin-bottom: 0.75rem; color: var(--primary);">4대보험 공제 내역</h4>
     <table style="width: 100%;">
       <tbody>
+        <tr>
+          <td style="padding: 0.5rem 0;">결근 공제</td>
+          <td style="padding: 0.5rem 0; color: var(--text-light); font-size: 0.875rem;">${calc.absentDays}일</td>
+          <td style="padding: 0.5rem 0; text-align: right; color: var(--danger);">-${formatKRW(calc.absenceDeduction)}</td>
+        </tr>
         ${calc.breakdown.map(item => `
           <tr>
             <td style="padding: 0.5rem 0;">${item.name}</td>
@@ -2886,7 +3154,7 @@ function showInsuranceDetailModal(id) {
         `).join('')}
         <tr style="border-top: 2px solid var(--border); font-weight: 700;">
           <td style="padding: 0.75rem 0;" colspan="2">총 공제액</td>
-          <td style="padding: 0.75rem 0; text-align: right; color: var(--danger);">-${formatKRW(calc.totalDeduction)}</td>
+          <td style="padding: 0.75rem 0; text-align: right; color: var(--danger);">-${formatKRW(calc.totalDeduction + calc.absenceDeduction)}</td>
         </tr>
       </tbody>
     </table>
