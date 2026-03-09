@@ -850,6 +850,23 @@ function openStudentManagement(instructorId) {
         </div>
       </div>
 
+      <div style="background: var(--bg); padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
+        <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 150px;">
+            <label style="font-size: 0.875rem; font-weight: 600; display: block; margin-bottom: 0.25rem;">학생 수 빠른 등록</label>
+            <input type="number" id="quickCommissionStudentCount_${instructorId}" class="form-input" placeholder="예: 10" min="1" max="100" style="width: 100%;">
+          </div>
+          <div style="flex: 1; min-width: 150px;">
+            <label style="font-size: 0.875rem; font-weight: 600; display: block; margin-bottom: 0.25rem;">1인당 수강료</label>
+            <input type="number" id="quickCommissionStudentTuition_${instructorId}" class="form-input" placeholder="예: 300000" min="0" step="10000" style="width: 100%;">
+          </div>
+          <button class="btn btn-accent" onclick="addQuickCommissionStudents(${instructorId})">추가</button>
+        </div>
+        <p style="font-size: 0.75rem; color: var(--text-light); margin-top: 0.5rem;">
+          학생 이름 없이 학생 수와 수강료만 넣으면 익명 학생이 자동 생성됩니다.
+        </p>
+      </div>
+
       ${calc ? `
         <div class="summary-grid" style="margin-bottom: 1rem;">
           <div class="summary-card">
@@ -947,8 +964,8 @@ function openAddStudentModal(instructorId) {
   document.getElementById('modalTitle').textContent = '학생 추가';
   document.getElementById('modalBody').innerHTML = `
     <div class="form-group">
-      <label class="form-label">학생명 *</label>
-      <input type="text" id="studentName" class="form-input" placeholder="학생 이름">
+      <label class="form-label">학생명</label>
+      <input type="text" id="studentName" class="form-input" placeholder="비우면 학생1처럼 자동 생성">
     </div>
     <div class="form-group">
       <label class="form-label">수강료 *</label>
@@ -988,15 +1005,49 @@ function saveNewStudent(instructorId) {
   const name = document.getElementById('studentName').value.trim();
   const tuition = parseInt(document.getElementById('studentTuition').value);
 
-  if (!name || isNaN(tuition) || tuition <= 0) {
-    alert('학생명과 수강료를 올바르게 입력해주세요.');
+  if (isNaN(tuition) || tuition <= 0) {
+    alert('수강료를 올바르게 입력해주세요.');
     return;
   }
 
-  addCommissionStudent(instructorId, selectedMonth, { name, tuition });
+  const students = getCommissionStudents(instructorId, selectedMonth);
+  const defaultName = `학생${students.length + 1}`;
+  addCommissionStudent(instructorId, selectedMonth, { name: name || defaultName, tuition });
   closeModal();
   openStudentManagement(instructorId);
   showToast('학생이 추가되었습니다.');
+}
+
+function addQuickCommissionStudents(instructorId) {
+  const countInput = document.getElementById(`quickCommissionStudentCount_${instructorId}`);
+  const tuitionInput = document.getElementById(`quickCommissionStudentTuition_${instructorId}`);
+  const count = parseInt(countInput.value, 10) || 0;
+  const tuition = parseInt(tuitionInput.value, 10) || 0;
+
+  if (count <= 0) {
+    alert('학생 수를 입력해주세요.');
+    return;
+  }
+
+  if (tuition <= 0) {
+    alert('1인당 수강료를 입력해주세요.');
+    return;
+  }
+
+  const existingStudents = getCommissionStudents(instructorId, selectedMonth);
+  const nextId = existingStudents.length > 0
+    ? Math.max(...existingStudents.map(s => s.id || 0)) + 1
+    : 1;
+
+  const newStudents = Array.from({ length: count }, (_, index) => ({
+    id: nextId + index,
+    name: `학생${existingStudents.length + index + 1}`,
+    tuition
+  }));
+
+  setCommissionStudents(instructorId, selectedMonth, [...existingStudents, ...newStudents]);
+  openStudentManagement(instructorId);
+  showToast(`${count}명의 학생이 추가되었습니다.`);
 }
 
 function saveEditStudent(instructorId, studentId) {
