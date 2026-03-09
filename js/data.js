@@ -55,7 +55,7 @@ function getDefaultData() {
     // 설정
     settings: {
       minimumWage: MINIMUM_WAGE,
-      assistantDeduction: 0.008,    // 0.8% 고용보험
+      assistantDeduction: 0.009,    // 0.9% 고용보험
       instructorDeduction: 0.033,   // 3.3% 사업소득세
       cardFeeRate: 0.01             // 1% 카드수수료 (비율제 강사용)
     }
@@ -74,6 +74,9 @@ function ensureDataCompatibility(data) {
   if (!data.insuranceAbsences) data.insuranceAbsences = [];
   if (!data.settings) data.settings = getDefaultData().settings;
   if (data.settings.cardFeeRate === undefined) data.settings.cardFeeRate = 0.01;
+  if (data.settings.assistantDeduction === undefined || data.settings.assistantDeduction === 0.008) {
+    data.settings.assistantDeduction = 0.009;
+  }
 
   // 사업장 데이터 호환성 처리
   if (!data.businesses) {
@@ -110,6 +113,7 @@ function ensureDataCompatibility(data) {
     if (t.hireDate === undefined) t.hireDate = null;
     if (t.terminationDate === undefined) t.terminationDate = null;
     if (t.position === undefined) t.position = null;
+    if (t.residentId === undefined) t.residentId = null;
   });
 
   // 특강 데이터 호환성 처리
@@ -516,6 +520,7 @@ function addInsuranceTeacher(info) {
     type: 'insuranceTeacher',
     businessId: info.businessId,
     monthlySalary: info.monthlySalary,
+    residentId: info.residentId || null,
     hireDate: info.hireDate || null,
     terminationDate: info.terminationDate || null,
     position: info.position || null

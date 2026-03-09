@@ -376,7 +376,7 @@ function renderStaffManagement(container) {
                 wageInfo = `${formatKRW(staff.tier2Rate || staff.hourlyRate)}/시간`;
               }
               const typeName = staff.type === 'assistant' ? '조교' : '강사';
-              const deductionType = staff.type === 'assistant' ? '고용보험 0.8%' : '3.3%';
+              const deductionType = staff.type === 'assistant' ? '고용보험 0.9%' : '3.3%';
               const businessName = getBusinessName(staff.businessId);
               const positionDisplay = staff.position || '-';
               const hireDateDisplay = staff.hireDate || '-';
@@ -475,7 +475,7 @@ function getStaffFormHTML(staff = null) {
       <div class="form-group">
         <label class="form-label">공제 유형 *</label>
         <select id="staffType" class="form-select">
-          <option value="assistant" ${staff?.type === 'assistant' ? 'selected' : ''}>고용보험 0.8% (조교)</option>
+          <option value="assistant" ${staff?.type === 'assistant' ? 'selected' : ''}>고용보험 0.9% (조교)</option>
           <option value="partInstructor" ${staff?.type === 'partInstructor' ? 'selected' : ''}>3.3% (강사)</option>
         </select>
       </div>
@@ -2843,6 +2843,14 @@ function addManualLog() {
 // ============ 4대보험 직원 관리 ============
 let showTerminatedInsurance = false;
 
+function formatResidentId(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 13);
+  if (digits.length <= 6) {
+    return digits;
+  }
+  return `${digits.slice(0, 6)}-${digits.slice(6)}`;
+}
+
 function renderInsuranceTeachers(container) {
   const allTeachers = getInsuranceTeachersByBusiness(selectedBusiness);
   const { year, month } = parseMonthKey(selectedMonth);
@@ -3004,6 +3012,18 @@ function getInsuranceTeacherFormHTML(teacher = null) {
       <label class="form-label">월 급여 (세전) *</label>
       <input type="number" id="insTeacherSalary" class="form-input" value="${teacher?.monthlySalary || 3000000}" min="0" step="10000">
     </div>
+    <div class="form-group">
+      <label class="form-label">주민등록번호</label>
+      <input
+        type="text"
+        id="insTeacherResidentId"
+        class="form-input"
+        value="${formatResidentId(teacher?.residentId || '')}"
+        placeholder="예: 900101-1234567"
+        maxlength="14"
+      >
+      <small style="color: var(--text-light);">세무 처리용으로만 사용됩니다.</small>
+    </div>
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">입사일</label>
@@ -3049,9 +3069,15 @@ function saveNewInsuranceTeacher() {
 
   const hireDate = document.getElementById('insTeacherHireDate').value || null;
   const terminationDate = document.getElementById('insTeacherTermDate').value || null;
+  const residentId = formatResidentId(document.getElementById('insTeacherResidentId').value.trim());
 
   if (hireDate && terminationDate && terminationDate < hireDate) {
     alert('퇴사일은 입사일 이후여야 합니다.');
+    return;
+  }
+
+  if (residentId && !/^\d{6}-\d{7}$/.test(residentId)) {
+    alert('주민등록번호 형식을 확인해주세요. 예: 900101-1234567');
     return;
   }
 
@@ -3059,6 +3085,7 @@ function saveNewInsuranceTeacher() {
     name,
     businessId: parseInt(document.getElementById('insTeacherBusinessId').value),
     monthlySalary: parseInt(document.getElementById('insTeacherSalary').value) || 0,
+    residentId,
     hireDate,
     terminationDate,
     position: getInsurancePositionValue()
@@ -3089,9 +3116,15 @@ function saveEditInsuranceTeacher(id) {
 
   const hireDate = document.getElementById('insTeacherHireDate').value || null;
   const terminationDate = document.getElementById('insTeacherTermDate').value || null;
+  const residentId = formatResidentId(document.getElementById('insTeacherResidentId').value.trim());
 
   if (hireDate && terminationDate && terminationDate < hireDate) {
     alert('퇴사일은 입사일 이후여야 합니다.');
+    return;
+  }
+
+  if (residentId && !/^\d{6}-\d{7}$/.test(residentId)) {
+    alert('주민등록번호 형식을 확인해주세요. 예: 900101-1234567');
     return;
   }
 
@@ -3099,6 +3132,7 @@ function saveEditInsuranceTeacher(id) {
     name,
     businessId: parseInt(document.getElementById('insTeacherBusinessId').value),
     monthlySalary: parseInt(document.getElementById('insTeacherSalary').value) || 0,
+    residentId,
     hireDate,
     terminationDate,
     position: getInsurancePositionValue()
@@ -3135,6 +3169,7 @@ function showInsuranceDetailModal(id) {
     <div style="margin-bottom: 1rem; padding: 1rem; background: var(--bg); border-radius: 8px;">
       <strong>${selectedMonth} 결근 정보</strong>
       <div style="margin-top: 0.5rem; color: var(--text-light);">결근 ${calc.absentDays}일, 1일 공제액 ${formatKRW(calc.dailyDeduction)}</div>
+      <div style="margin-top: 0.25rem; color: var(--text-light);">주민등록번호: ${teacher.residentId || '-'}</div>
     </div>
 
     <h4 style="margin-bottom: 0.75rem; color: var(--primary);">4대보험 공제 내역</h4>

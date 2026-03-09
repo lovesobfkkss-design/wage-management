@@ -84,7 +84,7 @@ function calculateDeduction(staff, grossPay, settings) {
 
   if (staff.type === 'assistant') {
     rate = settings.assistantDeduction;
-    typeName = '고용보험(0.8%)';
+    typeName = '고용보험(0.9%)';
   } else if (staff.type === 'partInstructor' || staff.type === 'instructor') {
     rate = settings.instructorDeduction;
     typeName = '사업소득세(3.3%)';

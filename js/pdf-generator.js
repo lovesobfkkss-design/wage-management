@@ -19,7 +19,7 @@ function createStaffPayslipHTML(staff, monthKey, logs, wage, ded) {
   const businessName = getBusinessName(staff.businessId);
   const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
   const typeName = staff.type === 'assistant' ? '조교' : '파트강사';
-  const deductionRate = staff.type === 'assistant' ? '0.8%' : '3.3%';
+  const deductionRate = staff.type === 'assistant' ? '0.9%' : '3.3%';
   const today = new Date();
   const todayStr = formatDateKorean(today);
 
@@ -340,6 +340,7 @@ function createInsurancePayslipHTML(teacher, monthKey, calc) {
         <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[직원 정보]</h3>
         <p style="margin: 4px 0; font-size: 13px;">이름: ${teacher.name}</p>
         <p style="margin: 4px 0; font-size: 13px;">직급: ${teacher.position || '4대보험 직원'}</p>
+        <p style="margin: 4px 0; font-size: 13px;">주민등록번호: ${teacher.residentId || '-'}</p>
         <p style="margin: 4px 0; font-size: 13px;">입사일: ${teacher.hireDate || '-'}</p>
       </div>
 
