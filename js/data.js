@@ -105,6 +105,9 @@ function ensureDataCompatibility(data) {
   data.commissionInstructors.forEach(i => {
     if (!i.businessId) i.businessId = 2;
   });
+  data.commissionStudents.forEach(record => {
+    if (!Array.isArray(record.students)) record.students = [];
+  });
 
   // 4대보험 직원 데이터 호환성 처리
   if (!data.insuranceTeachers) data.insuranceTeachers = [];
@@ -424,7 +427,7 @@ function getCommissionStudents(instructorId, monthKey) {
   const record = appData.commissionStudents.find(
     s => s.instructorId === instructorId && s.monthKey === monthKey
   );
-  return record ? record.students : [];
+  return Array.isArray(record?.students) ? record.students : [];
 }
 
 // 특정 강사의 월별 학생 데이터 설정 (덮어쓰기)
