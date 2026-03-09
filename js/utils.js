@@ -248,7 +248,8 @@ function calculateCommission(instructor, students, settings) {
 /**
  * 특강 정산 계산
  * - 동일한 강사가 과목별로 다른 비율 적용 가능
- * - 카드수수료 1% + 사업소득세 3.3% 적용
+ * - 카드수수료 1% 적용
+ * - 필요 시 사업소득세 3.3% 제외 가능
  */
 function calculateSpecialLecture(lecture, students, settings) {
   // 1. 총 수강료 합계
@@ -263,7 +264,8 @@ function calculateSpecialLecture(lecture, students, settings) {
   const academyShare = afterCardFee - instructorGross;
 
   // 4. 사업소득세 공제
-  const incomeTax = Math.round(instructorGross * settings.instructorDeduction);
+  const taxExcluded = !!lecture.excludeInstructorTax;
+  const incomeTax = taxExcluded ? 0 : Math.round(instructorGross * settings.instructorDeduction);
 
   // 5. 실지급액
   const netPay = instructorGross - incomeTax;
@@ -285,6 +287,7 @@ function calculateSpecialLecture(lecture, students, settings) {
     instructorGross,
     academyShare,
     incomeTax,
+    taxExcluded,
     netPay,
     totalDeduction,
     breakdown,
@@ -632,7 +635,9 @@ function generateSpecialLectureMessage(lecture, monthKey, calc) {
   message += `• 수수료 공제 후: ${formatKRW(calc.afterCardFee)}\n`;
   message += `• 강사 비율(${ratePercent}%): ${formatKRW(calc.instructorGross)}\n\n`;
 
-  message += `사업소득세(3.3%) 공제: -${formatKRW(calc.incomeTax)}\n`;
+  message += calc.taxExcluded
+    ? '사업소득세(3.3%): 제외\n'
+    : `사업소득세(3.3%) 공제: -${formatKRW(calc.incomeTax)}\n`;
   message += `→ 최종 지급예정액: ${formatKRW(calc.netPay)}\n\n`;
   message += `맞는지 확인 후 답변 부탁드립니다.`;
 

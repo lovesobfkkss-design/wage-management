@@ -36,6 +36,8 @@ function getDefaultData() {
     ],
     // 근무 기록 (시급제)
     workLogs: [],
+    // 근무기록 수정 이력
+    workLogHistories: [],
     // 비율제 강사
     commissionInstructors: [],
     // 비율제 강사 학생 데이터 (월별)
@@ -66,8 +68,9 @@ function ensureDataCompatibility(data) {
   if (!data.commissionInstructors) data.commissionInstructors = [];
   if (!data.commissionStudents) data.commissionStudents = [];
   if (!data.workLogs) data.workLogs = [];
+  if (!data.workLogHistories) data.workLogHistories = [];
   if (!data.settings) data.settings = getDefaultData().settings;
-  if (!data.settings.cardFeeRate) data.settings.cardFeeRate = 0.01;
+  if (data.settings.cardFeeRate === undefined) data.settings.cardFeeRate = 0.01;
 
   // 사업장 데이터 호환성 처리
   if (!data.businesses) {
@@ -111,6 +114,7 @@ function ensureDataCompatibility(data) {
   if (!data.specialLectureStudents) data.specialLectureStudents = [];
   data.specialLectures.forEach(l => {
     if (!l.businessId) l.businessId = 2;
+    if (l.excludeInstructorTax === undefined) l.excludeInstructorTax = false;
   });
 
   return data;
@@ -289,6 +293,16 @@ function getStaffWorkLogs(staffId, monthKey) {
   );
 }
 
+function getWorkLogById(logId) {
+  return appData.workLogs.find(log => log.id === logId);
+}
+
+function getWorkLogHistories(logId) {
+  return appData.workLogHistories
+    .filter(history => history.logId === logId)
+    .sort((a, b) => new Date(b.editedAt) - new Date(a.editedAt));
+}
+
 // 직원 추가
 function addStaff(staffInfo) {
   const newId = Math.max(...appData.staff.map(s => s.id), 0) + 1;
@@ -333,7 +347,19 @@ function addWorkLog(logInfo) {
 function updateWorkLog(logId, updates) {
   const log = appData.workLogs.find(l => l.id === logId);
   if (log) {
-    Object.assign(log, updates);
+    const before = { ...log };
+    const { historyEntry, ...logUpdates } = updates;
+    Object.assign(log, logUpdates);
+    if (updates.historyEntry) {
+      const newHistoryId = Math.max(...appData.workLogHistories.map(h => h.id), 0) + 1;
+      appData.workLogHistories.push({
+        id: newHistoryId,
+        logId,
+        before,
+        after: { ...log },
+        ...historyEntry
+      });
+    }
     saveData(appData);
   }
   return log;
@@ -516,6 +542,7 @@ function addSpecialLecture(info) {
     instructorName: info.instructorName,
     commissionRate: info.commissionRate,
     businessId: info.businessId,
+    excludeInstructorTax: !!info.excludeInstructorTax,
     startDate: info.startDate || null,
     endDate: info.endDate || null,
     tuitionPerStudent: info.tuitionPerStudent || 0
@@ -663,14 +690,15 @@ function exportWorkLogsToExcel(monthKey) {
 }
 
 // 급여정산 Excel(CSV) 내보내기 (시급제 + 비율제 통합)
-function exportPayrollToExcel(monthKey) {
+function exportPayrollToExcel(monthKey, businessId = 'all') {
   const { year, month } = parseMonthKey(monthKey);
 
   const headers = ['이름', '유형', '총근무시간/수강료합계', '정산내역', '세전급여', '공제내역', '공제액', '실지급액'];
   const data = [];
 
   // 시급제 직원
-  appData.staff.forEach(staff => {
+  const staffList = businessId === 'all' ? appData.staff : appData.staff.filter(s => s.businessId === businessId);
+  staffList.forEach(staff => {
     const logs = getStaffWorkLogs(staff.id, monthKey);
     const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
     if (totalHours === 0) return;
@@ -692,7 +720,10 @@ function exportPayrollToExcel(monthKey) {
   });
 
   // 비율제 강사
-  appData.commissionInstructors.forEach(instructor => {
+  const commissionList = businessId === 'all'
+    ? appData.commissionInstructors
+    : appData.commissionInstructors.filter(i => i.businessId === businessId);
+  commissionList.forEach(instructor => {
     const students = getCommissionStudents(instructor.id, monthKey);
     if (students.length === 0) return;
 

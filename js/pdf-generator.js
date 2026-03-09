@@ -500,7 +500,7 @@ function createSpecialLecturePayslipHTML(lecture, monthKey, students, calc) {
         <p style="margin: 4px 0; font-size: 13px;">카드수수료 (1%): - ${formatKRW(calc.cardFee)}</p>
         <p style="margin: 4px 0; font-size: 13px;">수수료공제 후: ${formatKRW(calc.afterCardFee)}</p>
         <p style="margin: 4px 0; font-size: 13px;">강사 정산액 (${Math.round(lecture.commissionRate * 100)}%): ${formatKRW(calc.instructorGross)}</p>
-        <p style="margin: 4px 0; font-size: 13px;">사업소득세 (3.3%): - ${formatKRW(calc.incomeTax)}</p>
+        <p style="margin: 4px 0; font-size: 13px;">${calc.taxExcluded ? '사업소득세 (3.3%): 제외' : `사업소득세 (3.3%): - ${formatKRW(calc.incomeTax)}`}</p>
       </div>
 
       <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
@@ -513,7 +513,7 @@ function createSpecialLecturePayslipHTML(lecture, monthKey, students, calc) {
         </div>
         <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
           <span>공제액:</span>
-          <span>- ${formatKRW(calc.incomeTax)}</span>
+          <span>${calc.taxExcluded ? formatKRW(0) : `- ${formatKRW(calc.incomeTax)}`}</span>
         </div>
         <hr style="border: none; border-top: 1px solid #ccc; margin: 10px 0; width: 200px; margin-left: auto;">
         <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; margin: 4px 0;">

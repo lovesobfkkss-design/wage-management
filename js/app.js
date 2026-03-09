@@ -9,12 +9,15 @@ let selectedMonth = getMonthKey();
 let selectedRole = 'admin';
 let selectedBusiness = 'all';  // 'all' 또는 businessId
 let showTerminatedStaff = false;  // 퇴사자 표시 토글
+let clockIntervalId = null;
 
 // ============ 로그인 관련 ============
-function selectRole(role) {
+function selectRole(role, button) {
   selectedRole = role;
   document.querySelectorAll('.role-btn').forEach(btn => btn.classList.remove('active'));
-  event.target.closest('.role-btn').classList.add('active');
+  if (button) {
+    button.classList.add('active');
+  }
 
   document.getElementById('adminLogin').classList.toggle('hidden', role !== 'admin');
   document.getElementById('staffLogin').classList.toggle('hidden', role !== 'staff');
@@ -54,6 +57,10 @@ function loginStaff() {
 
   const password = document.getElementById('staffPassword').value;
   const staff = getStaffById(staffId);
+  if (!staff) {
+    alert('직원 정보를 찾을 수 없습니다.');
+    return;
+  }
 
   // 비밀번호 검증
   if (staff.password && staff.password !== password) {
@@ -389,7 +396,7 @@ function renderStaffManagement(container) {
                   <td>
                     <div class="actions">
                       <button class="btn btn-outline btn-sm" onclick="openEditStaffModal(${staff.id})">수정</button>
-                      <button class="btn btn-sm" style="background: var(--warning); color: white;" onclick="resetStaffPassword(${staff.id})">비번초기화</button>
+                      <button class="btn btn-warning btn-sm" onclick="resetStaffPassword(${staff.id})">비번초기화</button>
                       <button class="btn btn-danger btn-sm" onclick="confirmDeleteStaff(${staff.id})">삭제</button>
                     </div>
                   </td>
@@ -1059,9 +1066,78 @@ function deleteSelectedCommissionStudents(instructorId) {
 }
 
 // ============ 근무기록 ============
-function renderWorkLogs(container) {
-  const { year, month } = parseMonthKey(selectedMonth);
+function getWorkLogSnapshot(logInfo) {
+  return {
+    staffId: logInfo.staffId,
+    date: logInfo.date,
+    startTime: logInfo.startTime || '',
+    endTime: logInfo.endTime || '',
+    breakMinutes: logInfo.breakMinutes || 0,
+    hours: logInfo.hours,
+    memo: logInfo.memo || ''
+  };
+}
 
+function hasWorkLogChanges(before, after) {
+  return JSON.stringify(getWorkLogSnapshot(before)) !== JSON.stringify(getWorkLogSnapshot(after));
+}
+
+function getWorkLogEditorInfo() {
+  if (currentUser?.role === 'staff') {
+    return {
+      editedByType: 'staff',
+      editedById: currentUser.staffId,
+      editedByName: currentUser.staff?.name || '직원'
+    };
+  }
+
+  return {
+    editedByType: 'admin',
+    editedById: null,
+    editedByName: '관리자'
+  };
+}
+
+function formatWorkLogHistoryValue(key, value) {
+  if (key === 'staffId') {
+    return getStaffById(value)?.name || '알수없음';
+  }
+  if (key === 'hours') {
+    return `${Number(value || 0).toFixed(2)}시간`;
+  }
+  if (key === 'breakMinutes') {
+    return `${value || 0}분`;
+  }
+  return value || '-';
+}
+
+function normalizeWorkLogHistoryFieldValue(value) {
+  return value === undefined || value === null ? '' : String(value);
+}
+
+function getWorkLogHistoryChanges(history) {
+  const fieldLabels = {
+    staffId: '직원',
+    date: '날짜',
+    startTime: '출근',
+    endTime: '퇴근',
+    breakMinutes: '휴게',
+    hours: '근무시간',
+    memo: '메모'
+  };
+
+  return Object.keys(fieldLabels)
+    .filter(key => normalizeWorkLogHistoryFieldValue(history.before?.[key]) !== normalizeWorkLogHistoryFieldValue(history.after?.[key]))
+    .map(key => `
+      <tr>
+        <td style="padding: 0.5rem; font-weight: 600;">${fieldLabels[key]}</td>
+        <td style="padding: 0.5rem; color: var(--text-light);">${formatWorkLogHistoryValue(key, history.before?.[key])}</td>
+        <td style="padding: 0.5rem; color: var(--primary);">${formatWorkLogHistoryValue(key, history.after?.[key])}</td>
+      </tr>
+    `).join('');
+}
+
+function renderWorkLogs(container) {
   container.innerHTML = `
     <div class="card">
       <div class="card-header">
@@ -1105,6 +1181,7 @@ function renderWorkLogs(container) {
                     <td style="font-size: 0.8125rem; color: var(--text-light);">${log.memo || ''}</td>
                     <td>
                       <div class="actions">
+                        <button class="btn btn-accent btn-sm" onclick="openWorkLogHistoryModal(${log.id})">이력</button>
                         <button class="btn btn-outline btn-sm" onclick="openEditWorkLogModal(${log.id})">수정</button>
                         <button class="btn btn-danger btn-sm" onclick="confirmDeleteWorkLog(${log.id})">삭제</button>
                       </div>
@@ -1163,6 +1240,13 @@ function getWorkLogFormHTML(log = null) {
       <label class="form-label">메모</label>
       <input type="text" id="logMemo" class="form-input" value="${log?.memo || ''}">
     </div>
+    ${currentUser?.role === 'admin' && log ? `
+      <div class="form-group">
+        <label class="form-label">수정 사유 (선택)</label>
+        <input type="text" id="logEditReason" class="form-input" placeholder="예: 조교 요청 반영, 출퇴근 오기 정정">
+        <small style="color: var(--text-light);">관리자 수정은 변경 이력에 자동 저장됩니다.</small>
+      </div>
+    ` : ''}
   `;
 }
 
@@ -1177,7 +1261,11 @@ function openAddWorkLogModal() {
 }
 
 function openEditWorkLogModal(logId) {
-  const log = appData.workLogs.find(l => l.id === logId);
+  const log = getWorkLogById(logId);
+  if (!log) {
+    showToast('근무기록을 찾을 수 없습니다.');
+    return;
+  }
   document.getElementById('modalTitle').textContent = '근무기록 수정';
   document.getElementById('modalBody').innerHTML = getWorkLogFormHTML(log);
   document.getElementById('modalFooter').innerHTML = `
@@ -1226,30 +1314,118 @@ function saveNewWorkLog() {
 }
 
 function saveEditWorkLog(logId) {
+  const existingLog = getWorkLogById(logId);
+  if (!existingLog) {
+    showToast('근무기록을 찾을 수 없습니다.');
+    return;
+  }
+
   const staffId = parseInt(document.getElementById('logStaff').value);
   const staff = getStaffById(staffId);
+  const date = document.getElementById('logDate').value;
   const startTime = document.getElementById('logStart').value;
   const endTime = document.getElementById('logEnd').value;
   const breakMinutes = parseInt(document.getElementById('logBreak').value) || 0;
   let hours = parseFloat(document.getElementById('logHours').value);
 
+  if (!date || !staffId) {
+    alert('날짜와 직원을 선택해주세요.');
+    return;
+  }
+
   if (isNaN(hours) && startTime && endTime) {
     hours = calculateHours(startTime, endTime, breakMinutes, staff?.roundingRule || 'exact');
   }
 
-  updateWorkLog(logId, {
+  if (isNaN(hours) || hours <= 0) {
+    alert('근무시간을 입력해주세요.');
+    return;
+  }
+
+  const nextLog = {
     staffId,
-    date: document.getElementById('logDate').value,
+    date,
     startTime,
     endTime,
     breakMinutes,
     hours,
     memo: document.getElementById('logMemo').value.trim()
+  };
+
+  if (!hasWorkLogChanges(existingLog, nextLog)) {
+    closeModal();
+    showToast('변경된 내용이 없습니다.');
+    return;
+  }
+
+  const editorInfo = getWorkLogEditorInfo();
+  const historyReason = currentUser?.role === 'admin'
+    ? document.getElementById('logEditReason')?.value.trim() || ''
+    : '';
+
+  updateWorkLog(logId, {
+    ...nextLog,
+    modifiedAt: new Date().toISOString(),
+    modifiedByType: editorInfo.editedByType,
+    modifiedByName: editorInfo.editedByName,
+    historyEntry: {
+      ...editorInfo,
+      editedAt: new Date().toISOString(),
+      reason: historyReason
+    }
   });
 
   closeModal();
   renderContent();
   showToast('근무기록이 수정되었습니다.');
+}
+
+function openWorkLogHistoryModal(logId) {
+  const log = getWorkLogById(logId);
+  if (!log) {
+    showToast('근무기록을 찾을 수 없습니다.');
+    return;
+  }
+
+  const histories = getWorkLogHistories(logId);
+  const staff = getStaffById(log.staffId);
+
+  document.getElementById('modalTitle').textContent = '근무기록 수정 이력';
+  document.getElementById('modalBody').innerHTML = `
+    <div style="margin-bottom: 1rem; padding: 1rem; background: var(--bg); border-radius: 8px;">
+      <div><strong>직원:</strong> ${staff?.name || '알수없음'}</div>
+      <div><strong>날짜:</strong> ${log.date}</div>
+    </div>
+    ${histories.length > 0 ? histories.map(history => `
+      <div style="border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+          <strong>${history.editedByName}</strong>
+          <span style="color: var(--text-light);">${new Date(history.editedAt).toLocaleString('ko-KR')}</span>
+        </div>
+        <div style="font-size: 0.875rem; color: var(--text-light); margin-bottom: 0.75rem;">
+          수정 사유: ${history.reason || '미입력'}
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>항목</th>
+                <th>변경 전</th>
+                <th>변경 후</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${getWorkLogHistoryChanges(history)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `).join('') : '<div class="empty-state">수정 이력이 없습니다.</div>'}
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-primary" onclick="closeModal()">닫기</button>
+  `;
+  openModal();
 }
 
 function confirmDeleteWorkLog(logId) {
@@ -1310,7 +1486,7 @@ function renderPayroll(container) {
         <div class="month-selector">
           <input type="month" value="${selectedMonth}" onchange="changeMonth(this.value)">
         </div>
-        <button class="btn btn-success btn-sm" onclick="exportPayrollToExcel('${selectedMonth}')">Excel 다운로드</button>
+        <button class="btn btn-success btn-sm" onclick="exportPayrollToExcel('${selectedMonth}', selectedBusiness)">Excel 다운로드</button>
       </div>
     </div>
 
@@ -1694,13 +1870,13 @@ function printPayslip() {
 function renderMessages(container) {
   const { year, month } = parseMonthKey(selectedMonth);
 
-  const staffWithWork = appData.staff.filter(staff => {
+  const staffWithWork = getStaffByBusiness(selectedBusiness).filter(staff => {
     const logs = getStaffWorkLogs(staff.id, selectedMonth);
     return logs.reduce((sum, log) => sum + log.hours, 0) > 0;
   });
 
   // 비율제 강사 중 학생이 있는 강사
-  const commissionWithStudents = appData.commissionInstructors.filter(instructor => {
+  const commissionWithStudents = getCommissionInstructorsByBusiness(selectedBusiness).filter(instructor => {
     const students = getCommissionStudents(instructor.id, selectedMonth);
     return students.length > 0;
   });
@@ -1830,12 +2006,12 @@ function copyMessage(encodedMessage) {
 }
 
 function generateAllMessages() {
-  const staffWithWork = appData.staff.filter(staff => {
+  const staffWithWork = getStaffByBusiness(selectedBusiness).filter(staff => {
     const logs = getStaffWorkLogs(staff.id, selectedMonth);
     return logs.reduce((sum, log) => sum + log.hours, 0) > 0;
   });
 
-  const commissionWithStudents = appData.commissionInstructors.filter(instructor => {
+  const commissionWithStudents = getCommissionInstructorsByBusiness(selectedBusiness).filter(instructor => {
     const students = getCommissionStudents(instructor.id, selectedMonth);
     return students.length > 0;
   });
@@ -2138,7 +2314,7 @@ function renderMyWork(container) {
                 <td>${formatHours(log.hours)}</td>
                 <td style="font-size: 0.8125rem; color: var(--text-light);">${log.memo || ''}</td>
                 <td>
-                  <button class="btn btn-outline btn-sm" onclick="openEditWorkLogModal(${log.id})">수정</button>
+                  <button class="btn btn-outline btn-sm" onclick="openEditMyWorkLogModal(${log.id})">수정</button>
                   <button class="btn btn-danger btn-sm" onclick="deleteMyWorkLog(${log.id})">삭제</button>
                 </td>
               </tr>
@@ -2160,7 +2336,7 @@ function deleteMyWorkLog(logId) {
 }
 
 // 근무기록 수정 모달
-function openEditWorkLogModal(logId) {
+function openEditMyWorkLogModal(logId) {
   const log = appData.workLogs.find(l => l.id === logId);
   if (!log) {
     showToast('근무기록을 찾을 수 없습니다.');
@@ -2221,13 +2397,13 @@ function openEditWorkLogModal(logId) {
 
   document.getElementById('modalFooter').innerHTML = `
     <button class="btn btn-outline" onclick="closeModal()">취소</button>
-    <button class="btn btn-primary" onclick="saveEditWorkLog(${logId})">저장</button>
+    <button class="btn btn-primary" onclick="saveEditMyWorkLog(${logId})">저장</button>
   `;
   openModal();
 }
 
 // 근무기록 수정 저장
-function saveEditWorkLog(logId) {
+function saveEditMyWorkLog(logId) {
   const date = document.getElementById('editLogDate').value;
   const startTime = document.getElementById('editLogStartTime').value;
   const endTime = document.getElementById('editLogEndTime').value;
@@ -2248,16 +2424,36 @@ function saveEditWorkLog(logId) {
   const staff = getStaffById(log.staffId);
   const hours = calculateHours(startTime, endTime, breakMinutes, staff?.roundingRule || 'exact');
 
-  // 업데이트
-  log.date = date;
-  log.startTime = startTime;
-  log.endTime = endTime;
-  log.breakMinutes = breakMinutes;
-  log.hours = hours;
-  log.memo = memo;
-  log.modifiedAt = new Date().toISOString();
+  const nextLog = {
+    staffId: log.staffId,
+    date,
+    startTime,
+    endTime,
+    breakMinutes,
+    hours,
+    memo
+  };
 
-  saveData(appData);
+  if (!hasWorkLogChanges(log, nextLog)) {
+    closeModal();
+    showToast('변경된 내용이 없습니다.');
+    return;
+  }
+
+  updateWorkLog(logId, {
+    ...nextLog,
+    modifiedAt: new Date().toISOString(),
+    modifiedByType: 'staff',
+    modifiedByName: currentUser.staff?.name || '직원',
+    historyEntry: {
+      editedByType: 'staff',
+      editedById: currentUser.staffId,
+      editedByName: currentUser.staff?.name || '직원',
+      editedAt: new Date().toISOString(),
+      reason: ''
+    }
+  });
+
   closeModal();
   renderContent();
   showToast('근무기록이 수정되었습니다.');
@@ -2334,7 +2530,10 @@ function renderClockIn(container) {
   `;
 
   updateClock();
-  setInterval(updateClock, 1000);
+  if (clockIntervalId) {
+    clearInterval(clockIntervalId);
+  }
+  clockIntervalId = setInterval(updateClock, 1000);
 }
 
 function updateClock() {
@@ -2761,7 +2960,10 @@ function renderSpecialLectures(container) {
                   </td>
                   <td><span class="badge badge-special">${lecture.subject}</span></td>
                   <td>${lecture.instructorName}</td>
-                  <td><span class="badge badge-part">${formatPercent(lecture.commissionRate)}</span></td>
+                  <td>
+                    <span class="badge badge-part">${formatPercent(lecture.commissionRate)}</span>
+                    ${lecture.excludeInstructorTax ? '<br><span style="font-size: 0.75rem; color: var(--text-light);">3.3 제외</span>' : ''}
+                  </td>
                   <td style="font-size: 0.8125rem;">${period}</td>
                   <td>${students.length}명</td>
                   <td>${calc ? formatKRW(calc.totalTuition) : '-'}</td>
@@ -2846,12 +3048,18 @@ function getSpecialLectureFormHTML(lecture = null) {
         <input type="date" id="specialLectureEndDate" class="form-input" value="${lecture?.endDate || ''}">
       </div>
     </div>
+    <div class="form-group">
+      <label class="checkbox-label" style="display: flex; gap: 0.5rem; align-items: center;">
+        <input type="checkbox" id="specialLectureExcludeTax" ${lecture?.excludeInstructorTax ? 'checked' : ''}>
+        <span>사업소득세 3.3% 제외</span>
+      </label>
+    </div>
 
     <div style="background: var(--bg); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
       <strong>공제 안내</strong>
       <p style="font-size: 0.875rem; color: var(--text-light); margin-top: 0.5rem;">
         • 카드수수료 1% (전체 수강료에서 먼저 공제)<br>
-        • 사업소득세 3.3% (강사 몫에서 공제)
+        • 사업소득세 3.3% (강사 몫에서 공제, 제외 체크 시 미적용)
       </p>
     </div>
   `;
@@ -2873,6 +3081,7 @@ function saveNewSpecialLecture() {
     instructorName,
     commissionRate: parseFloat(document.getElementById('specialLectureRate').value) / 100,
     businessId: parseInt(document.getElementById('specialLectureBusinessId').value),
+    excludeInstructorTax: document.getElementById('specialLectureExcludeTax').checked,
     tuitionPerStudent: parseInt(document.getElementById('specialLectureTuition').value) || 0,
     startDate: document.getElementById('specialLectureStartDate').value || null,
     endDate: document.getElementById('specialLectureEndDate').value || null
@@ -2910,6 +3119,7 @@ function saveEditSpecialLecture(id) {
     instructorName,
     commissionRate: parseFloat(document.getElementById('specialLectureRate').value) / 100,
     businessId: parseInt(document.getElementById('specialLectureBusinessId').value),
+    excludeInstructorTax: document.getElementById('specialLectureExcludeTax').checked,
     tuitionPerStudent: parseInt(document.getElementById('specialLectureTuition').value) || 0,
     startDate: document.getElementById('specialLectureStartDate').value || null,
     endDate: document.getElementById('specialLectureEndDate').value || null
