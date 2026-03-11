@@ -311,7 +311,7 @@ function renderDashboard(container) {
   const { year, month } = parseMonthKey(monthKey);
 
   // 선택된 사업장에 따라 직원 필터링
-  const filteredStaff = getStaffByBusiness(selectedBusiness);
+  const filteredStaff = getStaffByBusiness(selectedBusiness).filter(staff => !staff.terminationDate);
   const filteredInstructors = getCommissionInstructorsByBusiness(selectedBusiness);
 
   let totalGross = 0;
