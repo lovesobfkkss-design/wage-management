@@ -21,14 +21,11 @@ function selectRole(role, button) {
 
   document.getElementById('adminLogin').classList.toggle('hidden', role !== 'admin');
   document.getElementById('staffLogin').classList.toggle('hidden', role !== 'staff');
-
-  if (role === 'staff') {
-    populateStaffSelect();
-  }
 }
 
 function populateStaffSelect() {
   const select = document.getElementById('staffSelect');
+  if (!select) return;
   select.innerHTML = '<option value="">-- 본인 이름 선택 --</option>';
   // 퇴사하지 않은 직원만 로그인 목록에 표시
   appData.staff
@@ -38,38 +35,53 @@ function populateStaffSelect() {
     });
 }
 
-function loginAdmin() {
-  const password = document.getElementById('adminPassword').value;
-  if (password === ADMIN_PASSWORD) {
-    currentUser = { role: 'admin' };
-    showMainApp();
-  } else {
-    alert('비밀번호가 올바르지 않습니다.');
+function updateBranding() {
+  const academyName = typeof getCurrentAcademyName === 'function' ? getCurrentAcademyName() : '급여관리시스템';
+  const loginTitle = document.querySelector('.login-title');
+  const headerTitle = document.querySelector('.header h1');
+  const loginLogo = document.querySelector('.login-logo-icon');
+  const headerLogo = document.querySelector('.header-logo');
+
+  if (loginTitle) loginTitle.textContent = academyName;
+  if (headerTitle) {
+    headerTitle.innerHTML = `<span class="header-logo">${academyName.slice(0, 2)}</span> 급여관리시스템`;
   }
+  if (loginLogo) loginLogo.textContent = academyName.slice(0, 2);
+  if (headerLogo) headerLogo.textContent = academyName.slice(0, 2);
+  document.title = `${academyName} 급여관리시스템`;
 }
 
-function loginStaff() {
-  const staffId = parseInt(document.getElementById('staffSelect').value);
-  if (!staffId) {
-    alert('이름을 선택해주세요.');
+async function loginAdmin() {
+  const academyCode = document.getElementById('adminAcademyCode').value;
+  const loginId = document.getElementById('adminLoginId').value;
+  const password = document.getElementById('adminPassword').value;
+
+  const result = await authenticateAcademyUser(academyCode, loginId, password, 'admin');
+  if (!result.success) {
+    alert(result.message);
     return;
   }
 
+  currentUser = result.user;
+  document.getElementById('adminPassword').value = '';
+  updateBranding();
+  showMainApp();
+}
+
+async function loginStaff() {
+  const academyCode = document.getElementById('staffAcademyCode').value;
+  const loginId = document.getElementById('staffLoginId').value;
   const password = document.getElementById('staffPassword').value;
-  const staff = getStaffById(staffId);
-  if (!staff) {
-    alert('직원 정보를 찾을 수 없습니다.');
+
+  const result = await authenticateAcademyUser(academyCode, loginId, password, 'staff');
+  if (!result.success) {
+    alert(result.message);
     return;
   }
 
-  // 비밀번호 검증
-  if (staff.password && staff.password !== password) {
-    alert('비밀번호가 일치하지 않습니다.');
-    return;
-  }
-
-  currentUser = { role: 'staff', staffId, staff };
-  document.getElementById('staffPassword').value = ''; // 비밀번호 필드 초기화
+  currentUser = result.user;
+  document.getElementById('staffPassword').value = '';
+  updateBranding();
   showMainApp();
 }
 
@@ -83,6 +95,7 @@ function logout() {
 function showMainApp() {
   document.getElementById('loginScreen').classList.add('hidden');
   document.getElementById('mainApp').classList.remove('hidden');
+  updateBranding();
   renderBusinessSelector();
   renderNavTabs();
   renderContent();
@@ -355,6 +368,7 @@ function renderStaffManagement(container) {
             <tr>
               <th>이름</th>
               <th>소속</th>
+              <th>로그인ID</th>
               <th>직급</th>
               <th>유형</th>
               <th>시급 정보</th>
@@ -388,6 +402,7 @@ function renderStaffManagement(container) {
                     ${isTerminated ? '<span class="badge" style="background: #ffebee; color: #c62828; margin-left: 0.5rem; font-size: 0.7rem;">퇴사</span>' : ''}
                   </td>
                   <td><span class="badge badge-business">${businessName}</span></td>
+                  <td style="font-size: 0.8125rem;">${staff.loginId || '-'}</td>
                   <td>${positionDisplay}</td>
                   <td><span class="badge ${staff.type === 'assistant' ? 'badge-assistant' : 'badge-instructor'}">${typeName}</span></td>
                   <td style="font-size: 0.8125rem;">${wageInfo}</td>
@@ -571,7 +586,7 @@ function saveNewStaff() {
     return;
   }
 
-  addStaff({
+  const newStaff = addStaff({
     name,
     businessId: parseInt(document.getElementById('staffBusinessId').value),
     type: document.getElementById('staffType').value,
@@ -588,7 +603,7 @@ function saveNewStaff() {
 
   closeModal();
   renderContent();
-  showToast('직원이 추가되었습니다.');
+  showToast(`직원이 추가되었습니다. 로그인 ID: ${newStaff.loginId || '생성 예정'}`);
 }
 
 function saveEditStaff(staffId) {
@@ -4009,20 +4024,28 @@ function resetStaffPassword(staffId) {
   if (!staff) return;
 
   if (confirm(`${staff.name}님의 비밀번호를 0000으로 초기화하시겠습니까?`)) {
-    staff.password = '0000';
-    saveData(appData);
-    showToast(`${staff.name}님의 비밀번호가 0000으로 초기화되었습니다.`);
+    const user = getUserByStaffId(staffId);
+    if (user) {
+      updateUserPassword(user.userId, '0000');
+      appData.users[user.userId].mustChangePassword = true;
+      saveData(appData);
+    } else {
+      staff.password = '0000';
+      saveData(appData);
+    }
+    showToast(`${staff.name}님의 비밀번호가 0000으로 초기화되었습니다. 로그인 ID: ${staff.loginId || '관리자 확인 필요'}`);
   }
 }
 
 function changeStaffPassword() {
   const staff = currentUser.staff;
+  const user = getUserByStaffId(staff.id);
   const currentPassword = document.getElementById('currentPassword').value;
   const newPassword = document.getElementById('newPassword').value;
   const confirmPassword = document.getElementById('confirmPassword').value;
 
   // 현재 비밀번호 확인
-  if (staff.password !== currentPassword) {
+  if ((user?.password || staff.password) !== currentPassword) {
     alert('현재 비밀번호가 일치하지 않습니다.');
     return;
   }
@@ -4040,9 +4063,13 @@ function changeStaffPassword() {
   }
 
   // 비밀번호 변경
-  const staffData = getStaffById(staff.id);
-  staffData.password = newPassword;
-  saveData(appData);
+  if (user) {
+    updateUserPassword(user.userId, newPassword);
+  } else {
+    const staffData = getStaffById(staff.id);
+    staffData.password = newPassword;
+    saveData(appData);
+  }
 
   // 현재 세션의 staff 객체도 업데이트
   currentUser.staff.password = newPassword;
@@ -4064,4 +4091,5 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // 직원 선택 목록 초기화
   populateStaffSelect();
+  updateBranding();
 });

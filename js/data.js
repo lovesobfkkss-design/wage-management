@@ -2,11 +2,16 @@
    강한영어수학학원 급여관리시스템 - 데이터 관리 (Firebase 연동)
    ============================================ */
 
-const STORAGE_KEY = 'ganghan_wage_system';
+const LEGACY_STORAGE_KEY = 'ganghan_wage_system';
 const ADMIN_PASSWORD = '1234'; // 실제로는 더 안전하게 관리하세요
 
 // Firebase 데이터 참조
-const dataRef = database.ref('appData');
+let dataRef = database.ref('appData');
+let dataMode = 'legacy';
+let currentAcademyId = null;
+let currentAcademyCode = null;
+let currentAcademyProfile = null;
+let firebaseValueHandler = null;
 
 // 기본 데이터 구조
 function getDefaultData() {
@@ -130,10 +135,198 @@ function ensureDataCompatibility(data) {
   return data;
 }
 
+function getStorageKey() {
+  if (dataMode === 'academy' && currentAcademyId) {
+    return `${LEGACY_STORAGE_KEY}_${currentAcademyId}`;
+  }
+  return LEGACY_STORAGE_KEY;
+}
+
+function normalizeUserMap(users) {
+  if (!users) return {};
+  if (Array.isArray(users)) {
+    return users.reduce((acc, user, index) => {
+      const key = user.userId || `user_${index + 1}`;
+      acc[key] = { ...user, userId: key };
+      return acc;
+    }, {});
+  }
+  return { ...users };
+}
+
+function generateUniqueLoginId(base, users, fallback) {
+  const normalizedBase = String(base || fallback || 'user').trim().replace(/\s+/g, '').toLowerCase();
+  const seed = normalizedBase || fallback || 'user';
+  const existing = new Set(Object.values(users).map(user => user.loginId));
+
+  if (!existing.has(seed)) {
+    return seed;
+  }
+
+  let suffix = 2;
+  while (existing.has(`${seed}${suffix}`)) {
+    suffix += 1;
+  }
+
+  return `${seed}${suffix}`;
+}
+
+function ensureAcademyUsersCompatibility(data, academyId) {
+  data.users = normalizeUserMap(data.users);
+  let changed = false;
+  const users = data.users;
+  const userList = Object.values(users);
+
+  let adminUser = userList.find(user => user.role === 'academyAdmin' || user.role === 'admin');
+  if (!adminUser) {
+    const userId = 'usr_admin';
+    users[userId] = {
+      userId,
+      role: 'academyAdmin',
+      academyId,
+      loginId: 'admin',
+      password: ADMIN_PASSWORD,
+      status: 'active',
+      mustChangePassword: true,
+      createdAt: new Date().toISOString()
+    };
+    adminUser = users[userId];
+    changed = true;
+  }
+
+  if (!adminUser.loginId) {
+    adminUser.loginId = 'admin';
+    changed = true;
+  }
+  if (!adminUser.password) {
+    adminUser.password = ADMIN_PASSWORD;
+    changed = true;
+  }
+
+  data.staff.forEach(staff => {
+    let user = Object.values(users).find(item => item.staffId === staff.id);
+    if (!user) {
+      const userId = `usr_staff_${staff.id}`;
+      const loginId = generateUniqueLoginId(staff.loginId || staff.name, users, `staff${staff.id}`);
+      users[userId] = {
+        userId,
+        role: 'staff',
+        academyId,
+        staffId: staff.id,
+        loginId,
+        password: staff.password || '0000',
+        status: 'active',
+        mustChangePassword: !staff.password || staff.password === '0000',
+        createdAt: new Date().toISOString()
+      };
+      user = users[userId];
+      changed = true;
+    }
+
+    if (!user.loginId) {
+      user.loginId = generateUniqueLoginId(staff.loginId || staff.name, users, `staff${staff.id}`);
+      changed = true;
+    }
+    if (!user.password) {
+      user.password = staff.password || '0000';
+      changed = true;
+    }
+    if (!user.role) {
+      user.role = 'staff';
+      changed = true;
+    }
+    if (!user.academyId && academyId) {
+      user.academyId = academyId;
+      changed = true;
+    }
+
+    if (staff.loginId !== user.loginId) {
+      staff.loginId = user.loginId;
+      changed = true;
+    }
+    if (!staff.password || staff.password !== user.password) {
+      staff.password = user.password;
+      changed = true;
+    }
+  });
+
+  return changed;
+}
+
+function ensureAcademyDataCompatibility(academyData, academyId, academyCode) {
+  if (!academyData) return null;
+
+  const workingData = ensureDataCompatibility({
+    businesses: academyData.businesses || [],
+    staff: academyData.staff || [],
+    workLogs: academyData.workLogs || [],
+    workLogHistories: academyData.workLogHistories || [],
+    commissionInstructors: academyData.commissionInstructors || [],
+    commissionStudents: academyData.commissionStudents || [],
+    insuranceTeachers: academyData.insuranceTeachers || [],
+    insuranceAbsences: academyData.insuranceAbsences || [],
+    specialLectures: academyData.specialLectures || [],
+    specialLectureStudents: academyData.specialLectureStudents || [],
+    settings: (academyData.settings && academyData.settings.payrollRules) || academyData.settings || getDefaultData().settings
+  });
+
+  workingData.profile = academyData.profile || {
+    academyId,
+    academyCode,
+    name: '학원',
+    status: 'active'
+  };
+  workingData.uiSettings = (academyData.settings && academyData.settings.ui) || {};
+  workingData.users = normalizeUserMap(academyData.users);
+
+  const changed = ensureAcademyUsersCompatibility(workingData, academyId);
+
+  return {
+    data: workingData,
+    changed
+  };
+}
+
+function buildAcademyPayload(data) {
+  return {
+    profile: data.profile || {
+      academyId: currentAcademyId,
+      academyCode: currentAcademyCode,
+      name: '학원',
+      status: 'active'
+    },
+    settings: {
+      payrollRules: data.settings || getDefaultData().settings,
+      ui: data.uiSettings || {}
+    },
+    businesses: data.businesses || [],
+    staff: data.staff || [],
+    workLogs: data.workLogs || [],
+    workLogHistories: data.workLogHistories || [],
+    commissionInstructors: data.commissionInstructors || [],
+    commissionStudents: data.commissionStudents || [],
+    insuranceTeachers: data.insuranceTeachers || [],
+    insuranceAbsences: data.insuranceAbsences || [],
+    specialLectures: data.specialLectures || [],
+    specialLectureStudents: data.specialLectureStudents || [],
+    users: normalizeUserMap(data.users)
+  };
+}
+
+function persistLocalCache(data) {
+  localStorage.setItem(getStorageKey(), JSON.stringify(data));
+}
+
+function detachFirebaseSync() {
+  if (!firebaseValueHandler) return;
+  dataRef.off('value', firebaseValueHandler);
+  firebaseValueHandler = null;
+}
+
 // 데이터 로드 (Firebase에서)
 function loadData() {
   // 먼저 로컬 캐시에서 로드 (빠른 초기 로딩)
-  const saved = localStorage.getItem(STORAGE_KEY);
+  const saved = localStorage.getItem(getStorageKey());
   if (saved) {
     return ensureDataCompatibility(JSON.parse(saved));
   }
@@ -143,11 +336,12 @@ function loadData() {
 // 데이터 저장 (Firebase + localStorage)
 function saveData(data) {
   // 로컬 캐시에 저장 (빠른 응답)
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  persistLocalCache(data);
 
   // Firebase에 저장 (서버 동기화)
   console.log('Firebase에 저장 시도...', new Date().toLocaleTimeString());
-  dataRef.set(data).then(() => {
+  const payload = dataMode === 'academy' ? buildAcademyPayload(data) : data;
+  dataRef.set(payload).then(() => {
     console.log('Firebase 저장 성공!', new Date().toLocaleTimeString());
   }).catch(err => {
     console.error('Firebase 저장 실패:', err);
@@ -159,28 +353,47 @@ function saveData(data) {
 function setupFirebaseSync() {
   console.log('Firebase 실시간 동기화 설정 중...');
 
-  dataRef.on('value', (snapshot) => {
+  detachFirebaseSync();
+  firebaseValueHandler = (snapshot) => {
     console.log('Firebase에서 데이터 수신!', new Date().toLocaleTimeString());
     const firebaseData = snapshot.val();
     if (firebaseData) {
-      const compatibleData = ensureDataCompatibility(firebaseData);
-      // 로컬 캐시 업데이트
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(compatibleData));
-      // 전역 데이터 업데이트
+      let compatibleData = null;
+      let changed = false;
+
+      if (dataMode === 'academy') {
+        const academyCompat = ensureAcademyDataCompatibility(firebaseData, currentAcademyId, currentAcademyCode);
+        compatibleData = academyCompat.data;
+        changed = academyCompat.changed;
+        currentAcademyProfile = compatibleData.profile || null;
+      } else {
+        compatibleData = ensureDataCompatibility(firebaseData);
+      }
+
+      persistLocalCache(compatibleData);
       appData = compatibleData;
       console.log('workLogs 개수:', appData.workLogs ? appData.workLogs.length : 0);
+
+      if (changed) {
+        dataRef.set(buildAcademyPayload(compatibleData));
+      }
+
       // 화면 다시 렌더링 (로그인 상태일 때만)
       if (typeof currentUser !== 'undefined' && currentUser) {
+        if (typeof updateBranding === 'function') {
+          updateBranding();
+        }
+        if (currentUser.role === 'staff' && currentUser.staffId) {
+          currentUser.staff = getStaffById(currentUser.staffId);
+        }
         renderContent();
-      }
-      // 직원 선택 목록 업데이트
-      if (typeof populateStaffSelect === 'function') {
-        populateStaffSelect();
       }
     } else {
       console.log('Firebase에 데이터 없음, 기본 데이터로 초기화');
     }
-  }, (error) => {
+  };
+
+  dataRef.on('value', firebaseValueHandler, (error) => {
     console.error('Firebase 동기화 오류:', error);
     alert('Firebase 연결 오류: ' + error.message);
   });
@@ -188,8 +401,9 @@ function setupFirebaseSync() {
 
 // 초기 데이터 마이그레이션 (localStorage -> Firebase)
 function migrateToFirebase() {
+  if (dataMode !== 'legacy') return;
   console.log('Firebase 마이그레이션 확인 중...');
-  const localData = localStorage.getItem(STORAGE_KEY);
+  const localData = localStorage.getItem(getStorageKey());
 
   dataRef.once('value').then((snapshot) => {
     const firebaseData = snapshot.val();
@@ -217,6 +431,114 @@ function migrateToFirebase() {
     console.error('Firebase 연결 실패:', err);
     alert('Firebase 연결 실패: ' + err.message + '\n\n보안 규칙을 확인해주세요.');
   });
+}
+
+async function activateAcademyDataMode(academyId, academyCode, preloadedData = null) {
+  detachFirebaseSync();
+  dataMode = 'academy';
+  currentAcademyId = academyId;
+  currentAcademyCode = academyCode;
+  dataRef = database.ref(`academies/${academyId}`);
+
+  const rawData = preloadedData || (await dataRef.once('value')).val();
+  const compat = ensureAcademyDataCompatibility(rawData, academyId, academyCode);
+  appData = compat.data;
+  currentAcademyProfile = appData.profile || null;
+  persistLocalCache(appData);
+
+  if (compat.changed) {
+    await dataRef.set(buildAcademyPayload(appData));
+  }
+
+  setupFirebaseSync();
+  return appData;
+}
+
+async function authenticateAcademyUser(academyCode, loginId, password, expectedRole) {
+  const normalizedCode = String(academyCode || '').trim().toLowerCase();
+  const normalizedLoginId = String(loginId || '').trim().toLowerCase();
+
+  if (!normalizedCode || !normalizedLoginId || !password) {
+    return { success: false, message: '학원코드, 로그인 ID, 비밀번호를 모두 입력해주세요.' };
+  }
+
+  const academyCodeSnapshot = await database.ref(`academiesByCode/${normalizedCode}`).once('value');
+  if (!academyCodeSnapshot.exists()) {
+    return { success: false, message: '학원코드를 찾을 수 없습니다.' };
+  }
+
+  const academyId = academyCodeSnapshot.val().academyId;
+  const academySnapshot = await database.ref(`academies/${academyId}`).once('value');
+  if (!academySnapshot.exists()) {
+    return { success: false, message: '학원 데이터를 찾을 수 없습니다.' };
+  }
+
+  const compat = ensureAcademyDataCompatibility(academySnapshot.val(), academyId, normalizedCode);
+  const users = Object.values(compat.data.users || {});
+  const user = users.find(item => String(item.loginId || '').trim().toLowerCase() === normalizedLoginId);
+
+  if (!user) {
+    return { success: false, message: '로그인 ID를 찾을 수 없습니다.' };
+  }
+
+  if (expectedRole === 'admin' && !(user.role === 'academyAdmin' || user.role === 'admin')) {
+    return { success: false, message: '관리자 계정이 아닙니다.' };
+  }
+  if (expectedRole === 'staff' && user.role !== 'staff') {
+    return { success: false, message: '직원 계정이 아닙니다.' };
+  }
+
+  if ((user.password || '') !== password) {
+    return { success: false, message: '비밀번호가 올바르지 않습니다.' };
+  }
+
+  await activateAcademyDataMode(academyId, normalizedCode, academySnapshot.val());
+
+  const sessionUser = {
+    role: user.role === 'staff' ? 'staff' : 'admin',
+    accountRole: user.role,
+    academyId,
+    academyCode: normalizedCode,
+    userId: user.userId,
+    loginId: user.loginId
+  };
+
+  if (sessionUser.role === 'staff') {
+    sessionUser.staffId = user.staffId;
+    sessionUser.staff = getStaffById(user.staffId);
+  }
+
+  return {
+    success: true,
+    user: sessionUser
+  };
+}
+
+function getCurrentAcademyName() {
+  if (appData?.uiSettings?.academyDisplayName) return appData.uiSettings.academyDisplayName;
+  if (appData?.profile?.name) return appData.profile.name;
+  if (currentAcademyProfile?.name) return currentAcademyProfile.name;
+  return '급여관리시스템';
+}
+
+function getUserByStaffId(staffId) {
+  return Object.values(normalizeUserMap(appData?.users)).find(user => user.staffId === staffId) || null;
+}
+
+function updateUserPassword(userId, newPassword) {
+  if (!appData?.users || !appData.users[userId]) return null;
+  appData.users[userId].password = newPassword;
+  appData.users[userId].mustChangePassword = false;
+
+  if (appData.users[userId].staffId) {
+    const staff = getStaffById(appData.users[userId].staffId);
+    if (staff) {
+      staff.password = newPassword;
+    }
+  }
+
+  saveData(appData);
+  return appData.users[userId];
 }
 
 // Firebase 동기화 시작
@@ -318,9 +640,29 @@ function addStaff(staffInfo) {
   const newId = Math.max(...appData.staff.map(s => s.id), 0) + 1;
   const newStaff = {
     id: newId,
+    password: staffInfo.password || '0000',
     ...staffInfo
   };
   appData.staff.push(newStaff);
+
+  if (dataMode === 'academy') {
+    appData.users = normalizeUserMap(appData.users);
+    const userId = `usr_staff_${newId}`;
+    const loginId = generateUniqueLoginId(staffInfo.loginId || staffInfo.name, appData.users, `staff${newId}`);
+    appData.users[userId] = {
+      userId,
+      role: 'staff',
+      academyId: currentAcademyId,
+      staffId: newId,
+      loginId,
+      password: newStaff.password,
+      status: 'active',
+      mustChangePassword: true,
+      createdAt: new Date().toISOString()
+    };
+    newStaff.loginId = loginId;
+  }
+
   saveData(appData);
   return newStaff;
 }
@@ -330,6 +672,11 @@ function updateStaff(staffId, updates) {
   const staff = getStaffById(staffId);
   if (staff) {
     Object.assign(staff, updates);
+    const user = getUserByStaffId(staffId);
+    if (user) {
+      if (updates.loginId) user.loginId = updates.loginId;
+      if (updates.password) user.password = updates.password;
+    }
     saveData(appData);
   }
   return staff;
@@ -338,6 +685,12 @@ function updateStaff(staffId, updates) {
 // 직원 삭제
 function deleteStaff(staffId) {
   appData.staff = appData.staff.filter(s => s.id !== staffId);
+  if (dataMode === 'academy' && appData.users) {
+    const user = getUserByStaffId(staffId);
+    if (user) {
+      delete appData.users[user.userId];
+    }
+  }
   saveData(appData);
 }
 
@@ -435,14 +788,23 @@ function setCommissionStudents(instructorId, monthKey, students) {
   const existingIndex = appData.commissionStudents.findIndex(
     s => s.instructorId === instructorId && s.monthKey === monthKey
   );
+  const normalizedStudents = Array.isArray(students) ? students : [];
+
+  if (normalizedStudents.length === 0) {
+    if (existingIndex >= 0) {
+      appData.commissionStudents.splice(existingIndex, 1);
+    }
+    saveData(appData);
+    return;
+  }
 
   if (existingIndex >= 0) {
-    appData.commissionStudents[existingIndex].students = students;
+    appData.commissionStudents[existingIndex].students = normalizedStudents;
   } else {
     appData.commissionStudents.push({
       instructorId,
       monthKey,
-      students
+      students: normalizedStudents
     });
   }
   saveData(appData);
@@ -681,6 +1043,11 @@ function importDataFromJSON(file) {
         const data = JSON.parse(e.target.result);
         if (data.staff && data.settings) {
           const compatibleData = ensureDataCompatibility(data);
+          if (dataMode === 'academy') {
+            compatibleData.profile = appData.profile;
+            compatibleData.uiSettings = appData.uiSettings;
+            compatibleData.users = appData.users;
+          }
           appData = compatibleData;
           saveData(appData);
           resolve(data);
@@ -782,7 +1149,13 @@ function exportPayrollToExcel(monthKey, businessId = 'all') {
 // 전체 데이터 초기화
 function resetAllData() {
   if (confirm('모든 데이터를 초기화하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
-    appData = getDefaultData();
+    const defaultData = getDefaultData();
+    if (dataMode === 'academy') {
+      defaultData.profile = appData.profile;
+      defaultData.uiSettings = appData.uiSettings;
+      defaultData.users = appData.users;
+    }
+    appData = defaultData;
     saveData(appData);
     return true;
   }

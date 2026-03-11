@@ -1,0 +1,14 @@
+{
+  "name": "ganghan-wage-migration-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Migration and backup tools for the wage management app",
+  "scripts": {
+    "backup:legacy": "node scripts/backup-legacy-data.js",
+    "migrate:legacy": "node scripts/migrate-legacy-to-academy.js",
+    "verify:migration": "node scripts/verify-migration.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.6.0"
+  }
+}
