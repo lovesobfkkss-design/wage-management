@@ -42,6 +42,7 @@
           <input type="password" id="adminPassword" class="form-input" placeholder="비밀번호 입력" onkeypress="if(event.key==='Enter') loginAdmin()">
         </div>
         <button class="btn btn-primary" style="width:100%" onclick="loginAdmin()">로그인</button>
+        <button class="btn btn-outline" style="width:100%; margin-top:0.75rem;" onclick="openAcademySignupModal()">학원 관리자 가입</button>
       </div>
 
       <div id="staffLogin" class="hidden">
@@ -58,6 +59,7 @@
           <input type="password" id="staffPassword" class="form-input" placeholder="비밀번호 입력" onkeypress="if(event.key==='Enter') loginStaff()">
         </div>
         <button class="btn btn-accent" style="width:100%" onclick="loginStaff()">출근 기록하기</button>
+        <button class="btn btn-outline" style="width:100%; margin-top:0.75rem;" onclick="openStaffSignupModal()">직원 가입 신청</button>
         <p style="font-size: 0.75rem; color: var(--text-light); margin-top: 0.5rem; text-align: center;">
           로그인 ID는 학원 관리자에게 확인하세요.
         </p>
@@ -114,10 +116,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
   <!-- JavaScript 파일 로드 (순서 중요) -->
-  <script src="js/utils.js?v=16"></script>
-  <script src="js/firebase-config.js?v=16"></script>
-  <script src="js/data.js?v=16"></script>
-  <script src="js/pdf-generator.js?v=16"></script>
-  <script src="js/app.js?v=16"></script>
+  <script src="js/utils.js?v=17"></script>
+  <script src="js/firebase-config.js?v=17"></script>
+  <script src="js/data.js?v=17"></script>
+  <script src="js/pdf-generator.js?v=17"></script>
+  <script src="js/app.js?v=17"></script>
 </body>
 </html>

@@ -127,6 +127,7 @@ function ensureDataCompatibility(data) {
   // 특강 데이터 호환성 처리
   if (!data.specialLectures) data.specialLectures = [];
   if (!data.specialLectureStudents) data.specialLectureStudents = [];
+  if (!data.pendingStaffRequests) data.pendingStaffRequests = [];
   data.specialLectures.forEach(l => {
     if (!l.businessId) l.businessId = 2;
     if (l.excludeInstructorTax === undefined) l.excludeInstructorTax = false;
@@ -267,6 +268,7 @@ function ensureAcademyDataCompatibility(academyData, academyId, academyCode) {
     insuranceAbsences: academyData.insuranceAbsences || [],
     specialLectures: academyData.specialLectures || [],
     specialLectureStudents: academyData.specialLectureStudents || [],
+    pendingStaffRequests: academyData.pendingStaffRequests || [],
     settings: (academyData.settings && academyData.settings.payrollRules) || academyData.settings || getDefaultData().settings
   });
 
@@ -309,6 +311,7 @@ function buildAcademyPayload(data) {
     insuranceAbsences: data.insuranceAbsences || [],
     specialLectures: data.specialLectures || [],
     specialLectureStudents: data.specialLectureStudents || [],
+    pendingStaffRequests: data.pendingStaffRequests || [],
     users: normalizeUserMap(data.users)
   };
 }
@@ -481,6 +484,13 @@ async function authenticateAcademyUser(academyCode, loginId, password, expectedR
     return { success: false, message: '로그인 ID를 찾을 수 없습니다.' };
   }
 
+  if (user.status === 'pending') {
+    return { success: false, message: '관리자 승인 대기 중인 계정입니다.' };
+  }
+  if (user.status === 'rejected' || user.status === 'disabled') {
+    return { success: false, message: '사용할 수 없는 계정입니다. 관리자에게 문의해주세요.' };
+  }
+
   if (expectedRole === 'admin' && !(user.role === 'academyAdmin' || user.role === 'admin')) {
     return { success: false, message: '관리자 계정이 아닙니다.' };
   }
@@ -523,6 +533,238 @@ function getCurrentAcademyName() {
 
 function getUserByStaffId(staffId) {
   return Object.values(normalizeUserMap(appData?.users)).find(user => user.staffId === staffId) || null;
+}
+
+function normalizeLoginIdValue(value) {
+  return String(value || '').trim().replace(/\s+/g, '');
+}
+
+function getPendingStaffRequests() {
+  return Array.isArray(appData?.pendingStaffRequests) ? appData.pendingStaffRequests : [];
+}
+
+function getPendingStaffRequestById(requestId) {
+  return getPendingStaffRequests().find(request => request.id === requestId) || null;
+}
+
+function getNextPendingRequestId() {
+  return Math.max(0, ...getPendingStaffRequests().map(request => request.id || 0)) + 1;
+}
+
+function getExistingLoginIds() {
+  const ids = new Set();
+  Object.values(normalizeUserMap(appData?.users)).forEach((user) => {
+    if (user.loginId) ids.add(String(user.loginId).toLowerCase());
+  });
+  getPendingStaffRequests().forEach((request) => {
+    if (request.status === 'pending' && request.loginId) {
+      ids.add(String(request.loginId).toLowerCase());
+    }
+  });
+  return ids;
+}
+
+function buildUniqueRequestedLoginId(name, requestedLoginId) {
+  const base = normalizeLoginIdValue(requestedLoginId || name);
+  const fallback = normalizeLoginIdValue(name) || 'staff';
+  const desired = base || fallback;
+  const existing = getExistingLoginIds();
+
+  if (!existing.has(desired.toLowerCase())) {
+    return desired;
+  }
+
+  let suffix = 2;
+  while (existing.has(`${desired}${suffix}`.toLowerCase())) {
+    suffix += 1;
+  }
+
+  return `${desired}${suffix}`;
+}
+
+async function createAcademySignup(signupInfo) {
+  const academyName = String(signupInfo.academyName || '').trim();
+  const academyCode = normalizeLoginIdValue(signupInfo.academyCode || '').toLowerCase();
+  const adminName = String(signupInfo.adminName || '').trim();
+  const loginId = normalizeLoginIdValue(signupInfo.loginId || '');
+  const password = String(signupInfo.password || '');
+
+  if (!academyName || !academyCode || !adminName || !loginId || !password) {
+    return { success: false, message: '모든 항목을 입력해주세요.' };
+  }
+
+  if (!/^[a-z0-9][a-z0-9-]{2,19}$/.test(academyCode)) {
+    return { success: false, message: '학원코드는 영문 소문자, 숫자, 하이픈으로 3~20자여야 합니다.' };
+  }
+
+  if (password.length < 4) {
+    return { success: false, message: '비밀번호는 4자리 이상이어야 합니다.' };
+  }
+
+  const codeRef = database.ref(`academiesByCode/${academyCode}`);
+  const codeSnapshot = await codeRef.once('value');
+  if (codeSnapshot.exists()) {
+    return { success: false, message: '이미 사용 중인 학원코드입니다.' };
+  }
+
+  const academyId = `acad_${academyCode}`;
+  const academyPayload = buildAcademyPayload({
+    profile: {
+      academyId,
+      academyCode,
+      name: academyName,
+      status: 'active',
+      createdAt: new Date().toISOString()
+    },
+    settings: getDefaultData().settings,
+    uiSettings: {
+      academyDisplayName: academyName,
+      loginTitle: '급여관리시스템'
+    },
+    businesses: [
+      { id: 1, name: academyName }
+    ],
+    staff: [],
+    workLogs: [],
+    workLogHistories: [],
+    commissionInstructors: [],
+    commissionStudents: [],
+    insuranceTeachers: [],
+    insuranceAbsences: [],
+    specialLectures: [],
+    specialLectureStudents: [],
+    pendingStaffRequests: [],
+    users: {
+      usr_admin: {
+        userId: 'usr_admin',
+        role: 'academyAdmin',
+        academyId,
+        name: adminName,
+        loginId,
+        password,
+        status: 'active',
+        mustChangePassword: false,
+        createdAt: new Date().toISOString()
+      }
+    }
+  });
+
+  await database.ref(`academies/${academyId}`).set(academyPayload);
+  await codeRef.set({
+    academyId,
+    status: 'active',
+    createdAt: new Date().toISOString()
+  });
+
+  return {
+    success: true,
+    academyId,
+    academyCode,
+    loginId
+  };
+}
+
+async function createStaffSignupRequest(signupInfo) {
+  const academyCode = normalizeLoginIdValue(signupInfo.academyCode || '').toLowerCase();
+  const name = String(signupInfo.name || '').trim();
+  const requestedLoginId = normalizeLoginIdValue(signupInfo.loginId || '');
+  const password = String(signupInfo.password || '');
+
+  if (!academyCode || !name || !password) {
+    return { success: false, message: '학원코드, 이름, 비밀번호를 입력해주세요.' };
+  }
+  if (password.length < 4) {
+    return { success: false, message: '비밀번호는 4자리 이상이어야 합니다.' };
+  }
+
+  const academyCodeSnapshot = await database.ref(`academiesByCode/${academyCode}`).once('value');
+  if (!academyCodeSnapshot.exists()) {
+    return { success: false, message: '학원코드를 찾을 수 없습니다.' };
+  }
+
+  const academyId = academyCodeSnapshot.val().academyId;
+  const academyRef = database.ref(`academies/${academyId}`);
+  const academySnapshot = await academyRef.once('value');
+  if (!academySnapshot.exists()) {
+    return { success: false, message: '학원 데이터를 찾을 수 없습니다.' };
+  }
+
+  const compat = ensureAcademyDataCompatibility(academySnapshot.val(), academyId, academyCode);
+  const academyData = compat.data;
+  const loginId = buildUniqueRequestedLoginId(name, requestedLoginId);
+  const hasApprovedUser = Object.values(academyData.users || {}).some((user) => String(user.loginId || '').toLowerCase() === loginId.toLowerCase());
+  if (hasApprovedUser) {
+    return { success: false, message: '이미 사용 중인 로그인 ID입니다.' };
+  }
+
+  academyData.pendingStaffRequests = Array.isArray(academyData.pendingStaffRequests) ? academyData.pendingStaffRequests : [];
+  const nextRequestId = Math.max(0, ...academyData.pendingStaffRequests.map((request) => request.id || 0)) + 1;
+  academyData.pendingStaffRequests.push({
+    id: nextRequestId,
+    name,
+    requestedLoginId: requestedLoginId || name,
+    loginId,
+    password,
+    academyId,
+    academyCode,
+    status: 'pending',
+    createdAt: new Date().toISOString()
+  });
+
+  await academyRef.set(buildAcademyPayload(academyData));
+  return {
+    success: true,
+    academyId,
+    loginId
+  };
+}
+
+function rejectPendingStaffRequest(requestId) {
+  const request = getPendingStaffRequestById(requestId);
+  if (!request) return false;
+  request.status = 'rejected';
+  request.reviewedAt = new Date().toISOString();
+  saveData(appData);
+  return true;
+}
+
+function approvePendingStaffRequest(requestId, staffInfo) {
+  const request = getPendingStaffRequestById(requestId);
+  if (!request) return { success: false, message: '가입 신청을 찾을 수 없습니다.' };
+
+  const newStaff = addStaff({
+    name: staffInfo.name || request.name,
+    loginId: request.loginId,
+    password: request.password,
+    businessId: staffInfo.businessId,
+    type: staffInfo.type,
+    hourlyRate: staffInfo.hourlyRate,
+    tier1Hours: staffInfo.tier1Hours,
+    tier1Rate: staffInfo.tier1Rate,
+    tier2Rate: staffInfo.tier2Rate,
+    roundingRule: staffInfo.roundingRule,
+    hireDate: staffInfo.hireDate || null,
+    terminationDate: null,
+    position: staffInfo.position || null
+  });
+
+  const user = getUserByStaffId(newStaff.id);
+  if (user) {
+    user.password = request.password;
+    user.status = 'active';
+    user.mustChangePassword = false;
+    user.loginId = request.loginId;
+  }
+
+  request.status = 'approved';
+  request.staffId = newStaff.id;
+  request.reviewedAt = new Date().toISOString();
+  saveData(appData);
+
+  return {
+    success: true,
+    staff: newStaff
+  };
 }
 
 function updateUserPassword(userId, newPassword) {

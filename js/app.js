@@ -85,6 +85,100 @@ async function loginStaff() {
   showMainApp();
 }
 
+function openAcademySignupModal() {
+  document.getElementById('modalTitle').textContent = '학원 관리자 가입';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">학원명 *</label>
+      <input type="text" id="signupAcademyName" class="form-input" placeholder="학원 이름">
+    </div>
+    <div class="form-group">
+      <label class="form-label">학원코드 *</label>
+      <input type="text" id="signupAcademyCode" class="form-input" placeholder="예: ganghan">
+      <small style="color: var(--text-light); font-size: 0.75rem;">영문 소문자, 숫자, 하이픈으로 입력하세요.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">관리자 이름 *</label>
+      <input type="text" id="signupAdminName" class="form-input" placeholder="관리자 이름">
+    </div>
+    <div class="form-group">
+      <label class="form-label">관리자 로그인 ID *</label>
+      <input type="text" id="signupAdminLoginId" class="form-input" value="admin" placeholder="관리자 로그인 ID">
+    </div>
+    <div class="form-group">
+      <label class="form-label">비밀번호 *</label>
+      <input type="password" id="signupAdminPassword" class="form-input" placeholder="비밀번호">
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="submitAcademySignup()">가입</button>
+  `;
+  openModal();
+}
+
+async function submitAcademySignup() {
+  const result = await createAcademySignup({
+    academyName: document.getElementById('signupAcademyName').value,
+    academyCode: document.getElementById('signupAcademyCode').value,
+    adminName: document.getElementById('signupAdminName').value,
+    loginId: document.getElementById('signupAdminLoginId').value,
+    password: document.getElementById('signupAdminPassword').value
+  });
+
+  if (!result.success) {
+    alert(result.message);
+    return;
+  }
+
+  closeModal();
+  showToast(`가입 완료. 학원코드: ${result.academyCode}, 관리자 ID: ${result.loginId}`);
+}
+
+function openStaffSignupModal() {
+  document.getElementById('modalTitle').textContent = '직원 가입 신청';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">학원코드 *</label>
+      <input type="text" id="requestAcademyCode" class="form-input" placeholder="예: ganghan">
+    </div>
+    <div class="form-group">
+      <label class="form-label">이름 *</label>
+      <input type="text" id="requestStaffName" class="form-input" placeholder="이름">
+    </div>
+    <div class="form-group">
+      <label class="form-label">희망 로그인 ID</label>
+      <input type="text" id="requestStaffLoginId" class="form-input" placeholder="비워두면 이름으로 생성">
+    </div>
+    <div class="form-group">
+      <label class="form-label">비밀번호 *</label>
+      <input type="password" id="requestStaffPassword" class="form-input" placeholder="비밀번호">
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="submitStaffSignupRequest()">신청</button>
+  `;
+  openModal();
+}
+
+async function submitStaffSignupRequest() {
+  const result = await createStaffSignupRequest({
+    academyCode: document.getElementById('requestAcademyCode').value,
+    name: document.getElementById('requestStaffName').value,
+    loginId: document.getElementById('requestStaffLoginId').value,
+    password: document.getElementById('requestStaffPassword').value
+  });
+
+  if (!result.success) {
+    alert(result.message);
+    return;
+  }
+
+  closeModal();
+  showToast(`가입 신청 완료. 승인 후 로그인 ID: ${result.loginId}`);
+}
+
 function logout() {
   currentUser = null;
   currentTab = 'dashboard';
@@ -431,11 +525,7 @@ function toggleTerminatedStaff(show) {
   renderContent();
 }
 
-function getStaffFormHTML(staff = null) {
-  const businessOptions = appData.businesses.map(b =>
-    `<option value="${b.id}" ${staff?.businessId === b.id ? 'selected' : ''}>${b.name}</option>`
-  ).join('');
-
+function getStaffFormHTML(staff = null, options = {}) {
   // 기본 선택 사업장 결정: 수정 시 기존 값, 추가 시 선택된 사업장 또는 첫번째 사업장
   const defaultBusinessId = staff?.businessId ||
     (selectedBusiness !== 'all' ? selectedBusiness : appData.businesses[0]?.id);
@@ -450,6 +540,12 @@ function getStaffFormHTML(staff = null) {
         <label class="form-label">이름 *</label>
         <input type="text" id="staffName" class="form-input" value="${staff?.name || ''}" required>
       </div>
+      <div class="form-group">
+        <label class="form-label">로그인 ID</label>
+        <input type="text" id="staffLoginId" class="form-input" value="${staff?.loginId || ''}" ${options.lockLoginId ? 'readonly' : ''} placeholder="비워두면 이름으로 생성">
+      </div>
+    </div>
+    <div class="form-row">
       <div class="form-group">
         <label class="form-label">소속 사업장 *</label>
         <select id="staffBusinessId" class="form-select">
@@ -588,6 +684,7 @@ function saveNewStaff() {
 
   const newStaff = addStaff({
     name,
+    loginId: document.getElementById('staffLoginId').value.trim() || name,
     businessId: parseInt(document.getElementById('staffBusinessId').value),
     type: document.getElementById('staffType').value,
     hourlyRate: parseInt(document.getElementById('tier2Rate').value) || 12000,
@@ -624,6 +721,7 @@ function saveEditStaff(staffId) {
 
   updateStaff(staffId, {
     name,
+    loginId: document.getElementById('staffLoginId').value.trim() || name,
     businessId: parseInt(document.getElementById('staffBusinessId').value),
     type: document.getElementById('staffType').value,
     hourlyRate: parseInt(document.getElementById('tier2Rate').value) || 12000,
@@ -2362,6 +2460,7 @@ function generateAllMessages() {
 
 // ============ 설정 ============
 function renderSettings(container) {
+  const pendingRequests = getPendingStaffRequests().filter(request => request.status === 'pending');
   container.innerHTML = `
     <div class="card">
       <div class="card-header">
@@ -2397,6 +2496,43 @@ function renderSettings(container) {
           </tbody>
         </table>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">직원 가입 승인</h3>
+      </div>
+      ${pendingRequests.length === 0 ? `
+        <div class="empty-state" style="padding: 1.5rem;">대기 중인 가입 신청이 없습니다.</div>
+      ` : `
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>이름</th>
+                <th>로그인ID</th>
+                <th>신청일</th>
+                <th>관리</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${pendingRequests.map(request => `
+                <tr>
+                  <td><strong>${request.name}</strong></td>
+                  <td>${request.loginId}</td>
+                  <td>${request.createdAt ? request.createdAt.slice(0, 10) : '-'}</td>
+                  <td>
+                    <div class="actions">
+                      <button class="btn btn-primary btn-sm" onclick="openApproveSignupModal(${request.id})">승인</button>
+                      <button class="btn btn-danger btn-sm" onclick="handleRejectSignupRequest(${request.id})">거절</button>
+                    </div>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `}
     </div>
 
     <div class="card">
@@ -2447,6 +2583,69 @@ function renderSettings(container) {
       </div>
     </div>
   `;
+}
+
+function openApproveSignupModal(requestId) {
+  const request = getPendingStaffRequestById(requestId);
+  if (!request) {
+    alert('가입 신청을 찾을 수 없습니다.');
+    return;
+  }
+
+  document.getElementById('modalTitle').textContent = '직원 가입 승인';
+  document.getElementById('modalBody').innerHTML = getStaffFormHTML({
+    name: request.name,
+    loginId: request.loginId,
+    type: 'assistant',
+    tier1Hours: 0,
+    tier1Rate: MINIMUM_WAGE,
+    tier2Rate: MINIMUM_WAGE,
+    hourlyRate: MINIMUM_WAGE
+  }, { lockLoginId: true });
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveApprovedSignup(${requestId})">승인 완료</button>
+  `;
+  openModal();
+}
+
+function saveApprovedSignup(requestId) {
+  const name = document.getElementById('staffName').value.trim();
+  if (!name) {
+    alert('이름을 입력해주세요.');
+    return;
+  }
+
+  const result = approvePendingStaffRequest(requestId, {
+    name,
+    businessId: parseInt(document.getElementById('staffBusinessId').value, 10),
+    type: document.getElementById('staffType').value,
+    hourlyRate: parseInt(document.getElementById('tier2Rate').value, 10) || MINIMUM_WAGE,
+    tier1Hours: parseInt(document.getElementById('tier1Hours').value, 10) || 0,
+    tier1Rate: parseInt(document.getElementById('tier1Rate').value, 10) || 0,
+    tier2Rate: parseInt(document.getElementById('tier2Rate').value, 10) || MINIMUM_WAGE,
+    roundingRule: document.getElementById('roundingRule').value,
+    hireDate: document.getElementById('staffHireDate').value || null,
+    position: getPositionValue()
+  });
+
+  if (!result.success) {
+    alert(result.message);
+    return;
+  }
+
+  closeModal();
+  renderContent();
+  showToast(`가입 승인 완료. 로그인 ID: ${result.staff.loginId}`);
+}
+
+function handleRejectSignupRequest(requestId) {
+  const request = getPendingStaffRequestById(requestId);
+  if (!request) return;
+  if (!confirm(`${request.name}님의 가입 신청을 거절하시겠습니까?`)) return;
+  rejectPendingStaffRequest(requestId);
+  renderContent();
+  showToast('가입 신청이 거절되었습니다.');
 }
 
 // ============ 사업장 관리 모달 ============
