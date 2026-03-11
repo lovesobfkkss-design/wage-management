@@ -77,6 +77,7 @@ function ensureDataCompatibility(data) {
   if (!data.workLogs) data.workLogs = [];
   if (!data.workLogHistories) data.workLogHistories = [];
   if (!data.insuranceAbsences) data.insuranceAbsences = [];
+  if (!data.messageLogs) data.messageLogs = [];
   if (!data.settings) data.settings = getDefaultData().settings;
   if (data.settings.cardFeeRate === undefined) data.settings.cardFeeRate = 0.01;
   if (data.settings.assistantDeduction === undefined || data.settings.assistantDeduction === 0.008) {
@@ -102,6 +103,7 @@ function ensureDataCompatibility(data) {
   data.staff.forEach(s => {
     if (!s.businessId) s.businessId = 2;
     if (!s.password) s.password = '0000';
+    if (s.phoneNumber === undefined) s.phoneNumber = '';
     if (s.hireDate === undefined) s.hireDate = null;
     if (s.terminationDate === undefined) s.terminationDate = null;
     if (s.position === undefined) s.position = null;
@@ -109,6 +111,7 @@ function ensureDataCompatibility(data) {
   // 기존 비율제 강사에 businessId 없으면 기본값 할당
   data.commissionInstructors.forEach(i => {
     if (!i.businessId) i.businessId = 2;
+    if (i.phoneNumber === undefined) i.phoneNumber = '';
   });
   data.commissionStudents.forEach(record => {
     if (!Array.isArray(record.students)) record.students = [];
@@ -269,6 +272,7 @@ function ensureAcademyDataCompatibility(academyData, academyId, academyCode) {
     specialLectures: academyData.specialLectures || [],
     specialLectureStudents: academyData.specialLectureStudents || [],
     pendingStaffRequests: academyData.pendingStaffRequests || [],
+    messageLogs: academyData.messageLogs || [],
     settings: (academyData.settings && academyData.settings.payrollRules) || academyData.settings || getDefaultData().settings
   });
 
@@ -312,6 +316,7 @@ function buildAcademyPayload(data) {
     specialLectures: data.specialLectures || [],
     specialLectureStudents: data.specialLectureStudents || [],
     pendingStaffRequests: data.pendingStaffRequests || [],
+    messageLogs: data.messageLogs || [],
     users: normalizeUserMap(data.users)
   };
 }
@@ -777,6 +782,23 @@ function updateUserPassword(userId, newPassword) {
 
   saveData(appData);
   return appData.users[userId];
+}
+
+function addMessageLog(logInfo) {
+  if (!appData.messageLogs) {
+    appData.messageLogs = [];
+  }
+
+  const newId = Math.max(0, ...appData.messageLogs.map(log => log.id || 0)) + 1;
+  const log = {
+    id: newId,
+    createdAt: new Date().toISOString(),
+    ...logInfo
+  };
+
+  appData.messageLogs.push(log);
+  saveData(appData);
+  return log;
 }
 
 // Firebase 동기화 시작

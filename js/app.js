@@ -573,6 +573,12 @@ function getStaffFormHTML(staff = null, options = {}) {
     </div>
     <div class="form-row">
       <div class="form-group">
+        <label class="form-label">휴대폰 번호</label>
+        <input type="text" id="staffPhoneNumber" class="form-input" value="${staff?.phoneNumber || ''}" placeholder="숫자만 입력">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
         <label class="form-label">입사일</label>
         <input type="date" id="staffHireDate" class="form-input" value="${staff?.hireDate || ''}">
       </div>
@@ -685,6 +691,7 @@ function saveNewStaff() {
   const newStaff = addStaff({
     name,
     loginId: document.getElementById('staffLoginId').value.trim() || name,
+    phoneNumber: document.getElementById('staffPhoneNumber').value.trim(),
     businessId: parseInt(document.getElementById('staffBusinessId').value),
     type: document.getElementById('staffType').value,
     hourlyRate: parseInt(document.getElementById('tier2Rate').value) || 12000,
@@ -722,6 +729,7 @@ function saveEditStaff(staffId) {
   updateStaff(staffId, {
     name,
     loginId: document.getElementById('staffLoginId').value.trim() || name,
+    phoneNumber: document.getElementById('staffPhoneNumber').value.trim(),
     businessId: parseInt(document.getElementById('staffBusinessId').value),
     type: document.getElementById('staffType').value,
     hourlyRate: parseInt(document.getElementById('tier2Rate').value) || 12000,
@@ -841,6 +849,10 @@ function openAddCommissionInstructorModal() {
       <input type="number" id="commInstructorRate" class="form-input" value="50" min="1" max="100" step="1">
       <small style="color: var(--text-light);">예: 50 = 5:5, 60 = 6:4 (강사:학원)</small>
     </div>
+    <div class="form-group">
+      <label class="form-label">휴대폰 번호</label>
+      <input type="text" id="commInstructorPhoneNumber" class="form-input" placeholder="숫자만 입력">
+    </div>
     <div style="background: var(--bg); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
       <strong>공제 안내</strong>
       <p style="font-size: 0.875rem; color: var(--text-light); margin-top: 0.5rem;">
@@ -880,6 +892,10 @@ function openEditCommissionInstructorModal(id) {
       <input type="number" id="commInstructorRate" class="form-input" value="${instructor.commissionRate * 100}" min="1" max="100" step="1">
       <small style="color: var(--text-light);">예: 50 = 5:5, 60 = 6:4 (강사:학원)</small>
     </div>
+    <div class="form-group">
+      <label class="form-label">휴대폰 번호</label>
+      <input type="text" id="commInstructorPhoneNumber" class="form-input" value="${instructor.phoneNumber || ''}" placeholder="숫자만 입력">
+    </div>
   `;
   document.getElementById('modalFooter').innerHTML = `
     <button class="btn btn-outline" onclick="closeModal()">취소</button>
@@ -905,7 +921,8 @@ function saveNewCommissionInstructor() {
   addCommissionInstructor({
     name,
     commissionRate: ratePercent / 100,
-    businessId
+    businessId,
+    phoneNumber: document.getElementById('commInstructorPhoneNumber').value.trim()
   });
 
   closeModal();
@@ -926,7 +943,8 @@ function saveEditCommissionInstructor(id) {
   updateCommissionInstructor(id, {
     name,
     commissionRate: ratePercent / 100,
-    businessId
+    businessId,
+    phoneNumber: document.getElementById('commInstructorPhoneNumber').value.trim()
   });
 
   closeModal();
@@ -1314,6 +1332,9 @@ function renderWorkLogs(container) {
           <button class="btn btn-primary" onclick="openAddWorkLogModal()">+ 근무 추가</button>
         </div>
       </div>
+      <div style="padding: 0 1.5rem 1rem; color: var(--text-light); font-size: 0.875rem;">
+        직원이 직접 입력하지 않아도 관리자가 이 화면에서 근무기록을 직접 추가·수정할 수 있습니다.
+      </div>
       <div class="table-container">
         <table>
           <thead>
@@ -1606,6 +1627,9 @@ function openPayrollWorkLogModal(staffId) {
 
   document.getElementById('modalTitle').textContent = `${staff.name} 근무시간 수정`;
   document.getElementById('modalBody').innerHTML = `
+    <div style="margin-bottom: 1rem; padding: 0.875rem 1rem; background: var(--bg); border-radius: 10px; font-size: 0.875rem; color: var(--text-light);">
+      직원이 먼저 입력하지 않아도 관리자께서 이 화면에서 근무기록을 직접 추가·수정할 수 있습니다.
+    </div>
     <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;">
       <div>
         <strong>${selectedMonth} 근무기록</strong>
@@ -1898,6 +1922,9 @@ function renderPayroll(container) {
     <div class="card">
       <div class="card-header">
         <h3 class="card-title">시급제 직원 정산</h3>
+      </div>
+      <div style="padding: 0 1.5rem 1rem; color: var(--text-light); font-size: 0.875rem;">
+        직원이 먼저 기록하지 않았더라도 <strong style="color: var(--text);">시간수정</strong>에서 관리자가 직접 근무기록을 추가·수정할 수 있습니다.
       </div>
       <div class="table-container">
         <table>
@@ -2359,14 +2386,25 @@ function showCommissionMessageModal(instructorId) {
   const students = getCommissionStudents(instructorId, selectedMonth);
   const calc = calculateCommission(instructor, students, appData.settings);
   const message = generateCommissionMessage(instructor, selectedMonth, calc);
+  const receiver = instructor?.phoneNumber || '';
 
   document.getElementById('modalTitle').textContent = `${instructor.name} 급여 확인 문자`;
   document.getElementById('modalBody').innerHTML = `
-    <div class="message-preview">${message}</div>
+    <div class="form-group">
+      <label class="form-label">수신번호</label>
+      <input type="text" id="smsReceiver" class="form-input" value="${receiver}" placeholder="숫자만 입력">
+      <small style="color: var(--text-light); font-size: 0.75rem;">비율제 강사 수정 화면에서 번호를 저장할 수 있습니다.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">문자 내용</label>
+      <textarea id="smsMessageText" class="form-input" rows="10">${message}</textarea>
+    </div>
   `;
   document.getElementById('modalFooter').innerHTML = `
     <button class="btn btn-outline" onclick="closeModal()">닫기</button>
     <button class="btn btn-success" onclick="copyMessage(\`${encodeURIComponent(message)}\`)">복사하기</button>
+    <button class="btn btn-outline" id="smsTestButton" onclick="sendSmsFromModal('commission', ${instructorId}, true)">테스트 발송</button>
+    <button class="btn btn-primary" id="smsSendButton" onclick="sendSmsFromModal('commission', ${instructorId}, false)">문자 보내기</button>
   `;
   openModal();
 }
@@ -2378,14 +2416,25 @@ function showMessageModal(staffId) {
   const wage = calculateWage(staff, totalHours);
   const ded = calculateDeduction(staff, wage.grossPay, appData.settings);
   const message = generatePayrollMessage(staff, selectedMonth, totalHours, wage, ded);
+  const receiver = staff?.phoneNumber || '';
 
   document.getElementById('modalTitle').textContent = `${staff.name} 급여 확인 문자`;
   document.getElementById('modalBody').innerHTML = `
-    <div class="message-preview">${message}</div>
+    <div class="form-group">
+      <label class="form-label">수신번호</label>
+      <input type="text" id="smsReceiver" class="form-input" value="${receiver}" placeholder="숫자만 입력">
+      <small style="color: var(--text-light); font-size: 0.75rem;">직원 수정 화면에서 번호를 저장할 수 있습니다.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">문자 내용</label>
+      <textarea id="smsMessageText" class="form-input" rows="10">${message}</textarea>
+    </div>
   `;
   document.getElementById('modalFooter').innerHTML = `
     <button class="btn btn-outline" onclick="closeModal()">닫기</button>
     <button class="btn btn-success" onclick="copyMessage(\`${encodeURIComponent(message)}\`)">복사하기</button>
+    <button class="btn btn-outline" id="smsTestButton" onclick="sendSmsFromModal('staff', ${staffId}, true)">테스트 발송</button>
+    <button class="btn btn-primary" id="smsSendButton" onclick="sendSmsFromModal('staff', ${staffId}, false)">문자 보내기</button>
   `;
   openModal();
 }
@@ -2393,6 +2442,94 @@ function showMessageModal(staffId) {
 function copyMessage(encodedMessage) {
   const message = decodeURIComponent(encodedMessage);
   copyToClipboard(message);
+}
+
+function normalizePhoneNumber(phoneNumber) {
+  return String(phoneNumber || '').replace(/[^\d]/g, '');
+}
+
+function getMessageTitle(name) {
+  const { month } = parseMonthKey(selectedMonth);
+  return `${month}월 급여 안내 - ${name}`;
+}
+
+async function sendSmsFromModal(targetType, targetId, isTest = false) {
+  const receiver = normalizePhoneNumber(document.getElementById('smsReceiver')?.value);
+  const message = document.getElementById('smsMessageText')?.value?.trim() || '';
+
+  if (!receiver) {
+    alert('수신번호를 입력해주세요.');
+    return;
+  }
+
+  if (!message) {
+    alert('문자 내용을 확인해주세요.');
+    return;
+  }
+
+  const target = targetType === 'staff'
+    ? getStaffById(targetId)
+    : getCommissionInstructorById(targetId);
+
+  const recipientName = target?.name || (targetType === 'staff' ? '직원' : '강사');
+  const button = document.getElementById(isTest ? 'smsTestButton' : 'smsSendButton');
+  const previousText = button?.textContent;
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = isTest ? '테스트 발송 중...' : '발송 중...';
+  }
+
+  try {
+    const response = await fetch('/api/send-sms', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        receiver,
+        msg: message,
+        title: getMessageTitle(recipientName),
+        testMode: isTest,
+        academyId: currentUser?.academyId || currentAcademyId,
+        academyCode: currentUser?.academyCode || currentAcademyCode
+      })
+    });
+
+    const result = await response.json();
+    if (!response.ok || result.success === false) {
+      throw new Error(result.message || '문자 발송에 실패했습니다.');
+    }
+
+    addMessageLog({
+      academyId: currentUser?.academyId || currentAcademyId,
+      targetType,
+      targetId,
+      recipientName,
+      receiver,
+      message,
+      title: getMessageTitle(recipientName),
+      status: isTest ? 'test-sent' : 'sent',
+      resultCode: result.resultCode || null,
+      messageId: result.msgId || null,
+      requestedBy: currentUser?.loginId || 'admin',
+      provider: 'aligo'
+    });
+
+    if (target && receiver !== normalizePhoneNumber(target.phoneNumber)) {
+      target.phoneNumber = receiver;
+      saveData(appData);
+    }
+
+    showToast(isTest ? '테스트 문자를 발송했습니다.' : '문자를 발송했습니다.');
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = previousText;
+    }
+  }
 }
 
 function generateAllMessages() {
