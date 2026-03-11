@@ -2510,6 +2510,7 @@ function renderSettings(container) {
             <thead>
               <tr>
                 <th>이름</th>
+                <th>희망ID</th>
                 <th>로그인ID</th>
                 <th>신청일</th>
                 <th>관리</th>
@@ -2519,6 +2520,7 @@ function renderSettings(container) {
               ${pendingRequests.map(request => `
                 <tr>
                   <td><strong>${request.name}</strong></td>
+                  <td>${request.requestedLoginId || request.name}</td>
                   <td>${request.loginId}</td>
                   <td>${request.createdAt ? request.createdAt.slice(0, 10) : '-'}</td>
                   <td>
@@ -2593,15 +2595,22 @@ function openApproveSignupModal(requestId) {
   }
 
   document.getElementById('modalTitle').textContent = '직원 가입 승인';
-  document.getElementById('modalBody').innerHTML = getStaffFormHTML({
-    name: request.name,
-    loginId: request.loginId,
-    type: 'assistant',
-    tier1Hours: 0,
-    tier1Rate: MINIMUM_WAGE,
-    tier2Rate: MINIMUM_WAGE,
-    hourlyRate: MINIMUM_WAGE
-  }, { lockLoginId: true });
+  document.getElementById('modalBody').innerHTML = `
+    <div style="margin-bottom: 1rem; padding: 0.875rem 1rem; background: var(--bg); border-radius: 10px; font-size: 0.875rem; color: var(--text-light);">
+      신청자 이름: <strong style="color: var(--text);">${request.name}</strong><br>
+      희망 로그인 ID: <strong style="color: var(--text);">${request.requestedLoginId || request.name}</strong><br>
+      배정 로그인 ID: <strong style="color: var(--primary);">${request.loginId}</strong>
+    </div>
+    ${getStaffFormHTML({
+      name: request.name,
+      loginId: request.loginId,
+      type: 'assistant',
+      tier1Hours: 0,
+      tier1Rate: MINIMUM_WAGE,
+      tier2Rate: MINIMUM_WAGE,
+      hourlyRate: MINIMUM_WAGE
+    }, { lockLoginId: true })}
+  `;
   document.getElementById('modalFooter').innerHTML = `
     <button class="btn btn-outline" onclick="closeModal()">취소</button>
     <button class="btn btn-primary" onclick="saveApprovedSignup(${requestId})">승인 완료</button>

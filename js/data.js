@@ -547,10 +547,6 @@ function getPendingStaffRequestById(requestId) {
   return getPendingStaffRequests().find(request => request.id === requestId) || null;
 }
 
-function getNextPendingRequestId() {
-  return Math.max(0, ...getPendingStaffRequests().map(request => request.id || 0)) + 1;
-}
-
 function getExistingLoginIds() {
   const ids = new Set();
   Object.values(normalizeUserMap(appData?.users)).forEach((user) => {
