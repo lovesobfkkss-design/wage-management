@@ -48,6 +48,10 @@ function getDefaultData() {
     // 비율제 강사 학생 데이터 (월별)
     // 형식: { instructorId, monthKey, students: [{ name, tuition }] }
     commissionStudents: [],
+    // 월급제 3.3% 강사
+    monthlyInstructors: [],
+    // 월급제 3.3% 강사 월별 급여
+    monthlyInstructorPayrolls: [],
     // 4대보험 직원 (월급제)
     insuranceTeachers: [],
     // 4대보험 직원 결근 데이터 (월별)
@@ -74,6 +78,8 @@ function ensureDataCompatibility(data) {
   // 기존 데이터에 새 필드가 없으면 추가
   if (!data.commissionInstructors) data.commissionInstructors = [];
   if (!data.commissionStudents) data.commissionStudents = [];
+  if (!data.monthlyInstructors) data.monthlyInstructors = [];
+  if (!data.monthlyInstructorPayrolls) data.monthlyInstructorPayrolls = [];
   if (!data.workLogs) data.workLogs = [];
   if (!data.workLogHistories) data.workLogHistories = [];
   if (!data.insuranceAbsences) data.insuranceAbsences = [];
@@ -117,6 +123,19 @@ function ensureDataCompatibility(data) {
   });
   data.commissionStudents.forEach(record => {
     if (!Array.isArray(record.students)) record.students = [];
+  });
+  data.monthlyInstructors.forEach(i => {
+    if (!i.businessId) i.businessId = 2;
+    if (i.phoneNumber === undefined) i.phoneNumber = '';
+    if (i.residentId === undefined) i.residentId = null;
+    if (i.hireDate === undefined) i.hireDate = null;
+    if (i.terminationDate === undefined) i.terminationDate = null;
+    if (i.position === undefined) i.position = null;
+  });
+  data.monthlyInstructorPayrolls.forEach(item => {
+    item.grossPay = Math.max(0, parseInt(item.grossPay, 10) || 0);
+    item.extraDeduction = Math.max(0, parseInt(item.extraDeduction, 10) || 0);
+    if (item.memo === undefined) item.memo = '';
   });
 
   // 4대보험 직원 데이터 호환성 처리
@@ -269,6 +288,8 @@ function ensureAcademyDataCompatibility(academyData, academyId, academyCode) {
     workLogHistories: academyData.workLogHistories || [],
     commissionInstructors: academyData.commissionInstructors || [],
     commissionStudents: academyData.commissionStudents || [],
+    monthlyInstructors: academyData.monthlyInstructors || [],
+    monthlyInstructorPayrolls: academyData.monthlyInstructorPayrolls || [],
     insuranceTeachers: academyData.insuranceTeachers || [],
     insuranceAbsences: academyData.insuranceAbsences || [],
     specialLectures: academyData.specialLectures || [],
@@ -313,6 +334,8 @@ function buildAcademyPayload(data) {
     workLogHistories: data.workLogHistories || [],
     commissionInstructors: data.commissionInstructors || [],
     commissionStudents: data.commissionStudents || [],
+    monthlyInstructors: data.monthlyInstructors || [],
+    monthlyInstructorPayrolls: data.monthlyInstructorPayrolls || [],
     insuranceTeachers: data.insuranceTeachers || [],
     insuranceAbsences: data.insuranceAbsences || [],
     specialLectures: data.specialLectures || [],
@@ -632,6 +655,8 @@ async function createAcademySignup(signupInfo) {
     workLogHistories: [],
     commissionInstructors: [],
     commissionStudents: [],
+    monthlyInstructors: [],
+    monthlyInstructorPayrolls: [],
     insuranceTeachers: [],
     insuranceAbsences: [],
     specialLectures: [],
@@ -845,10 +870,11 @@ function deleteBusiness(id) {
   // 소속 직원 확인
   const hasStaff = appData.staff.some(s => s.businessId === id);
   const hasInstructor = appData.commissionInstructors.some(i => i.businessId === id);
+  const hasMonthlyInstructor = appData.monthlyInstructors.some(i => i.businessId === id);
   const hasInsuranceTeacher = appData.insuranceTeachers.some(t => t.businessId === id);
   const hasSpecialLecture = appData.specialLectures.some(l => l.businessId === id);
 
-  if (hasStaff || hasInstructor || hasInsuranceTeacher || hasSpecialLecture) {
+  if (hasStaff || hasInstructor || hasMonthlyInstructor || hasInsuranceTeacher || hasSpecialLecture) {
     return { success: false, message: '해당 사업장에 소속된 직원이 있어 삭제할 수 없습니다.' };
   }
 
@@ -1001,6 +1027,81 @@ function deleteWorkLog(logId) {
 // 비율제 강사 조회
 function getCommissionInstructorById(id) {
   return appData.commissionInstructors.find(i => i.id === id);
+}
+
+function getMonthlyInstructorsByBusiness(businessId) {
+  if (businessId === 'all') {
+    return appData.monthlyInstructors;
+  }
+  return appData.monthlyInstructors.filter(i => i.businessId === businessId);
+}
+
+function getMonthlyInstructorById(id) {
+  return appData.monthlyInstructors.find(i => i.id === id);
+}
+
+function addMonthlyInstructor(info) {
+  const newId = Math.max(...appData.monthlyInstructors.map(i => i.id), 0) + 1;
+  const newInstructor = {
+    id: newId,
+    name: info.name,
+    businessId: info.businessId,
+    phoneNumber: info.phoneNumber || '',
+    residentId: info.residentId || null,
+    hireDate: info.hireDate || null,
+    terminationDate: info.terminationDate || null,
+    position: info.position || null
+  };
+  appData.monthlyInstructors.push(newInstructor);
+  saveData(appData);
+  return newInstructor;
+}
+
+function updateMonthlyInstructor(id, updates) {
+  const instructor = getMonthlyInstructorById(id);
+  if (instructor) {
+    Object.assign(instructor, updates);
+    saveData(appData);
+  }
+  return instructor;
+}
+
+function deleteMonthlyInstructor(id) {
+  appData.monthlyInstructors = appData.monthlyInstructors.filter(i => i.id !== id);
+  appData.monthlyInstructorPayrolls = appData.monthlyInstructorPayrolls.filter(item => item.instructorId !== id);
+  saveData(appData);
+}
+
+function getMonthlyInstructorPayroll(instructorId, monthKey) {
+  return appData.monthlyInstructorPayrolls.find(
+    item => item.instructorId === instructorId && item.monthKey === monthKey
+  ) || null;
+}
+
+function setMonthlyInstructorPayroll(instructorId, monthKey, payroll) {
+  const grossPay = Math.max(0, parseInt(payroll?.grossPay, 10) || 0);
+  const extraDeduction = Math.max(0, parseInt(payroll?.extraDeduction, 10) || 0);
+  const memo = (payroll?.memo || '').trim();
+  const index = appData.monthlyInstructorPayrolls.findIndex(
+    item => item.instructorId === instructorId && item.monthKey === monthKey
+  );
+
+  if (grossPay === 0 && extraDeduction === 0 && !memo) {
+    if (index >= 0) {
+      appData.monthlyInstructorPayrolls.splice(index, 1);
+      saveData(appData);
+    }
+    return null;
+  }
+
+  const nextValue = { instructorId, monthKey, grossPay, extraDeduction, memo };
+  if (index >= 0) {
+    appData.monthlyInstructorPayrolls[index] = nextValue;
+  } else {
+    appData.monthlyInstructorPayrolls.push(nextValue);
+  }
+  saveData(appData);
+  return nextValue;
 }
 
 // 비율제 강사 추가
@@ -1354,11 +1455,11 @@ function exportWorkLogsToExcel(monthKey) {
   downloadCSV(csv, `근무기록_${year}년${month}월.csv`);
 }
 
-// 급여정산 Excel(CSV) 내보내기 (시급제 + 비율제 통합)
+// 급여정산 Excel(CSV) 내보내기 (시급제 + 비율제 + 월급제 3.3% 통합)
 function exportPayrollToExcel(monthKey, businessId = 'all') {
   const { year, month } = parseMonthKey(monthKey);
 
-  const headers = ['이름', '유형', '총근무시간/수강료합계', '정산내역', '세전급여', '공제내역', '공제액', '실지급액'];
+  const headers = ['이름', '유형', '기준금액', '정산내역', '세전급여', '공제내역', '공제액', '실지급액', '비고'];
   const data = [];
 
   // 시급제 직원
@@ -1380,7 +1481,8 @@ function exportPayrollToExcel(monthKey, businessId = 'all') {
       Math.round(wage.grossPay),
       ded.typeName,
       Math.round(ded.deduction),
-      Math.round(ded.netPay)
+      Math.round(ded.netPay),
+      ''
     ]);
   });
 
@@ -1402,7 +1504,30 @@ function exportPayrollToExcel(monthKey, businessId = 'all') {
       Math.round(calc.instructorGross),
       `카드1%+3.3%`,
       Math.round(calc.totalDeduction),
-      Math.round(calc.netPay)
+      Math.round(calc.netPay),
+      ''
+    ]);
+  });
+
+  const monthlyInstructorList = businessId === 'all'
+    ? appData.monthlyInstructors
+    : appData.monthlyInstructors.filter(i => i.businessId === businessId);
+  monthlyInstructorList.forEach(instructor => {
+    const payroll = getMonthlyInstructorPayroll(instructor.id, monthKey);
+    if (!payroll || payroll.grossPay <= 0) return;
+
+    const calc = calculateMonthlyInstructorPayroll(payroll.grossPay, appData.settings, payroll.extraDeduction);
+    const deductionLabel = calc.extraDeduction > 0 ? '사업소득세 3.3% + 추가공제' : '사업소득세 3.3%';
+    data.push([
+      instructor.name,
+      '월급제 3.3%',
+      Math.round(calc.grossPay),
+      `월별 지급총액 입력`,
+      Math.round(calc.grossPay),
+      deductionLabel,
+      Math.round(calc.totalDeduction),
+      Math.round(calc.netPay),
+      payroll.memo || ''
     ]);
   });
 

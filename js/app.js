@@ -233,6 +233,7 @@ function renderNavTabs() {
       <button class="nav-tab ${currentTab === 'staff' ? 'active' : ''}" onclick="switchTab('staff')">직원관리</button>
       <button class="nav-tab ${currentTab === 'insurance' ? 'active' : ''}" onclick="switchTab('insurance')">4대보험</button>
       <button class="nav-tab ${currentTab === 'commission' ? 'active' : ''}" onclick="switchTab('commission')">비율제강사</button>
+      <button class="nav-tab ${currentTab === 'monthlyInstructor' ? 'active' : ''}" onclick="switchTab('monthlyInstructor')">월급제강사</button>
       <button class="nav-tab ${currentTab === 'specialLecture' ? 'active' : ''}" onclick="switchTab('specialLecture')">특강관리</button>
       <button class="nav-tab ${currentTab === 'worklogs' ? 'active' : ''}" onclick="switchTab('worklogs')">근무기록</button>
       <button class="nav-tab ${currentTab === 'payroll' ? 'active' : ''}" onclick="switchTab('payroll')">급여정산</button>
@@ -272,6 +273,9 @@ function renderContent() {
       break;
     case 'commission':
       renderCommissionInstructors(main);
+      break;
+    case 'monthlyInstructor':
+      renderMonthlyInstructors(main);
       break;
     case 'specialLecture':
       renderSpecialLectures(main);
@@ -313,11 +317,12 @@ function renderDashboard(container) {
   // 선택된 사업장에 따라 직원 필터링
   const filteredStaff = getStaffByBusiness(selectedBusiness).filter(staff => !staff.terminationDate);
   const filteredInstructors = getCommissionInstructorsByBusiness(selectedBusiness);
+  const filteredMonthlyInstructors = getMonthlyInstructorsByBusiness(selectedBusiness).filter(instructor => !instructor.terminationDate);
 
   let totalGross = 0;
   let totalNet = 0;
   let totalDeductions = 0;
-  const staffCount = filteredStaff.length + filteredInstructors.length;
+  const staffCount = filteredStaff.length + filteredInstructors.length + filteredMonthlyInstructors.length;
 
   // 시급제 직원 계산
   filteredStaff.forEach(staff => {
@@ -339,6 +344,15 @@ function renderDashboard(container) {
       totalDeductions += calc.totalDeduction;
       totalNet += calc.netPay;
     }
+  });
+
+  filteredMonthlyInstructors.forEach(instructor => {
+    const payroll = getMonthlyInstructorPayroll(instructor.id, monthKey);
+    if (!payroll || payroll.grossPay <= 0) return;
+    const calc = calculateMonthlyInstructorPayroll(payroll.grossPay, appData.settings, payroll.extraDeduction);
+    totalGross += calc.grossPay;
+    totalDeductions += calc.totalDeduction;
+    totalNet += calc.netPay;
   });
 
   // 사업장 이름 표시
@@ -421,6 +435,23 @@ function renderDashboard(container) {
                   <td><span class="badge badge-part">비율제</span></td>
                   <td>${calc ? formatKRW(calc.totalTuition) : '-'}</td>
                   <td>${calc ? formatKRW(calc.instructorGross) : '-'}</td>
+                  <td style="color: var(--danger);">${calc ? '-' + formatKRW(calc.totalDeduction) : '-'}</td>
+                  <td><strong>${calc ? formatKRW(calc.netPay) : '-'}</strong></td>
+                </tr>
+              `;
+            }).join('')}
+            ${filteredMonthlyInstructors.map(instructor => {
+              const payroll = getMonthlyInstructorPayroll(instructor.id, monthKey);
+              const calc = payroll ? calculateMonthlyInstructorPayroll(payroll.grossPay, appData.settings, payroll.extraDeduction) : null;
+              const businessName = getBusinessName(instructor.businessId);
+              return `
+                <tr>
+                  <td><strong>${instructor.name}</strong></td>
+                  <td style="font-family: monospace; font-size: 0.8125rem;">${instructor.residentId || '-'}</td>
+                  <td><span class="badge badge-business">${businessName}</span></td>
+                  <td><span class="badge badge-instructor">월급제 3.3%</span></td>
+                  <td>${calc ? formatKRW(calc.grossPay) : '미입력'}</td>
+                  <td>${calc ? formatKRW(calc.grossPay) : '-'}</td>
                   <td style="color: var(--danger);">${calc ? '-' + formatKRW(calc.totalDeduction) : '-'}</td>
                   <td><strong>${calc ? formatKRW(calc.netPay) : '-'}</strong></td>
                 </tr>
@@ -1318,6 +1349,339 @@ function deleteSelectedCommissionStudents(instructorId) {
   showToast(`${checkboxes.length}명의 학생이 삭제되었습니다.`);
 }
 
+// ============ 월급제 3.3% 강사 관리 ============
+let showTerminatedMonthlyInstructors = false;
+
+function getMonthlyInstructorPositionValue() {
+  const select = document.getElementById('monthlyInstructorPosition');
+  if (select.value === 'custom') {
+    return document.getElementById('monthlyInstructorPositionCustom').value.trim() || null;
+  }
+  return select.value || null;
+}
+
+function toggleMonthlyInstructorCustomPosition(select) {
+  const customGroup = document.getElementById('monthlyInstructorCustomPositionGroup');
+  if (customGroup) {
+    customGroup.style.display = select.value === 'custom' ? 'block' : 'none';
+  }
+}
+
+function getMonthlyInstructorFormHTML(instructor = null) {
+  const defaultBusinessId = instructor?.businessId ||
+    (selectedBusiness !== 'all' ? selectedBusiness : appData.businesses[0]?.id);
+  const positionOptions = ['원장', '실장', '주임', '일반'];
+  const isCustomPosition = instructor?.position && !positionOptions.includes(instructor.position);
+
+  return `
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">이름 *</label>
+        <input type="text" id="monthlyInstructorName" class="form-input" value="${instructor?.name || ''}" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">소속 사업장 *</label>
+        <select id="monthlyInstructorBusinessId" class="form-select">
+          ${appData.businesses.map(b =>
+            `<option value="${b.id}" ${defaultBusinessId === b.id ? 'selected' : ''}>${b.name}</option>`
+          ).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">직급</label>
+        <select id="monthlyInstructorPosition" class="form-select" onchange="toggleMonthlyInstructorCustomPosition(this)">
+          <option value="">선택 안함</option>
+          ${positionOptions.map(p => `
+            <option value="${p}" ${instructor?.position === p ? 'selected' : ''}>${p}</option>
+          `).join('')}
+          <option value="custom" ${isCustomPosition ? 'selected' : ''}>기타 (직접입력)</option>
+        </select>
+      </div>
+      <div class="form-group" id="monthlyInstructorCustomPositionGroup" style="display: ${isCustomPosition ? 'block' : 'none'};">
+        <label class="form-label">직급 직접입력</label>
+        <input type="text" id="monthlyInstructorPositionCustom" class="form-input" value="${isCustomPosition ? instructor.position : ''}" placeholder="직급 입력">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">휴대폰 번호</label>
+        <input type="text" id="monthlyInstructorPhoneNumber" class="form-input" value="${instructor?.phoneNumber || ''}" placeholder="숫자만 입력">
+      </div>
+      <div class="form-group">
+        <label class="form-label">주민등록번호</label>
+        <input type="text" id="monthlyInstructorResidentId" class="form-input" value="${formatResidentId(instructor?.residentId || '')}" placeholder="예: 900101-1234567" maxlength="14">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">입사일</label>
+        <input type="date" id="monthlyInstructorHireDate" class="form-input" value="${instructor?.hireDate || ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">퇴사일</label>
+        <input type="date" id="monthlyInstructorTerminationDate" class="form-input" value="${instructor?.terminationDate || ''}">
+      </div>
+    </div>
+    <div style="background: var(--bg); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+      <strong>정산 방식 안내</strong>
+      <p style="font-size: 0.875rem; color: var(--text-light); margin-top: 0.5rem;">
+        월별 세전 지급액을 직접 입력하고, 사업소득세 3.3%를 자동 공제합니다.<br>
+        추가 공제가 있으면 해당 월에만 별도로 입력할 수 있습니다.
+      </p>
+    </div>
+  `;
+}
+
+function renderMonthlyInstructors(container) {
+  const { year, month } = parseMonthKey(selectedMonth);
+  const allInstructors = getMonthlyInstructorsByBusiness(selectedBusiness);
+  const activeInstructors = allInstructors.filter(i => !i.terminationDate);
+  const terminatedInstructors = allInstructors.filter(i => !!i.terminationDate);
+  const filteredInstructors = showTerminatedMonthlyInstructors ? allInstructors : activeInstructors;
+
+  container.innerHTML = `
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+      <h2 style="color: var(--primary);">${year}년 ${month}월 월급제 3.3% 강사 관리</h2>
+      <div style="display: flex; gap: 1rem; align-items: center;">
+        <div class="month-selector">
+          <input type="month" value="${selectedMonth}" onchange="changeMonth(this.value)">
+        </div>
+        ${terminatedInstructors.length > 0 ? `
+          <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: var(--text-light); cursor: pointer;">
+            <input type="checkbox" ${showTerminatedMonthlyInstructors ? 'checked' : ''} onchange="toggleTerminatedMonthlyInstructors(this.checked)">
+            퇴사자 포함 (${terminatedInstructors.length}명)
+          </label>
+        ` : ''}
+        <button class="btn btn-primary" onclick="openAddMonthlyInstructorModal()">+ 강사 추가</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">등록된 월급제 3.3% 강사 (${filteredInstructors.length}명)</h3>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>이름</th>
+              <th>주민번호</th>
+              <th>소속</th>
+              <th>직급</th>
+              <th>${month}월 세전</th>
+              <th>${month}월 공제</th>
+              <th>${month}월 실지급</th>
+              <th>입사일</th>
+              <th>관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filteredInstructors.length > 0 ? filteredInstructors.map(instructor => {
+              const isTerminated = !!instructor.terminationDate;
+              const rowStyle = isTerminated ? 'background: #fafafa; opacity: 0.7;' : '';
+              const nameStyle = isTerminated ? 'text-decoration: line-through; color: var(--text-light);' : '';
+              const payroll = getMonthlyInstructorPayroll(instructor.id, selectedMonth);
+              const calc = payroll ? calculateMonthlyInstructorPayroll(payroll.grossPay, appData.settings, payroll.extraDeduction) : null;
+              const businessName = getBusinessName(instructor.businessId);
+              return `
+                <tr style="${rowStyle}">
+                  <td>
+                    <strong style="${nameStyle}">${instructor.name}</strong>
+                    ${isTerminated ? '<span class="badge" style="background: #ffebee; color: #c62828; margin-left: 0.5rem; font-size: 0.7rem;">퇴사</span>' : ''}
+                  </td>
+                  <td style="font-family: monospace; font-size: 0.8125rem;">${instructor.residentId || '-'}</td>
+                  <td><span class="badge badge-business">${businessName}</span></td>
+                  <td>${instructor.position || '-'}</td>
+                  <td>${calc ? formatKRW(calc.grossPay) : '미입력'}</td>
+                  <td style="color: var(--danger);">${calc ? '-' + formatKRW(calc.totalDeduction) : '-'}</td>
+                  <td><strong style="color: var(--success);">${calc ? formatKRW(calc.netPay) : '-'}</strong></td>
+                  <td style="font-size: 0.8125rem;">${instructor.hireDate || '-'}</td>
+                  <td>
+                    <div class="actions">
+                      <button class="btn btn-primary btn-sm" onclick="openMonthlyInstructorPayrollModal(${instructor.id})">월급입력</button>
+                      <button class="btn btn-outline btn-sm" onclick="openEditMonthlyInstructorModal(${instructor.id})">수정</button>
+                      <button class="btn btn-danger btn-sm" onclick="confirmDeleteMonthlyInstructor(${instructor.id})">삭제</button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join('') : '<tr><td colspan="9" class="empty-state">등록된 월급제 강사가 없습니다.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function toggleTerminatedMonthlyInstructors(show) {
+  showTerminatedMonthlyInstructors = show;
+  renderContent();
+}
+
+function openAddMonthlyInstructorModal() {
+  document.getElementById('modalTitle').textContent = '월급제 3.3% 강사 추가';
+  document.getElementById('modalBody').innerHTML = getMonthlyInstructorFormHTML();
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveNewMonthlyInstructor()">저장</button>
+  `;
+  openModal();
+}
+
+function openEditMonthlyInstructorModal(id) {
+  const instructor = getMonthlyInstructorById(id);
+  document.getElementById('modalTitle').textContent = '월급제 3.3% 강사 수정';
+  document.getElementById('modalBody').innerHTML = getMonthlyInstructorFormHTML(instructor);
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    <button class="btn btn-primary" onclick="saveEditMonthlyInstructor(${id})">저장</button>
+  `;
+  openModal();
+}
+
+function saveNewMonthlyInstructor() {
+  const name = document.getElementById('monthlyInstructorName').value.trim();
+  const hireDate = document.getElementById('monthlyInstructorHireDate').value || null;
+  const terminationDate = document.getElementById('monthlyInstructorTerminationDate').value || null;
+  const residentId = formatResidentId(document.getElementById('monthlyInstructorResidentId').value.trim());
+
+  if (!name) {
+    alert('이름을 입력해주세요.');
+    return;
+  }
+  if (hireDate && terminationDate && terminationDate < hireDate) {
+    alert('퇴사일은 입사일 이후여야 합니다.');
+    return;
+  }
+  if (residentId && !/^\d{6}-\d{7}$/.test(residentId)) {
+    alert('주민등록번호 형식을 확인해주세요. 예: 900101-1234567');
+    return;
+  }
+
+  addMonthlyInstructor({
+    name,
+    businessId: parseInt(document.getElementById('monthlyInstructorBusinessId').value, 10),
+    phoneNumber: document.getElementById('monthlyInstructorPhoneNumber').value.trim(),
+    residentId,
+    hireDate,
+    terminationDate,
+    position: getMonthlyInstructorPositionValue()
+  });
+
+  closeModal();
+  renderContent();
+  showToast('월급제 강사가 추가되었습니다.');
+}
+
+function saveEditMonthlyInstructor(id) {
+  const name = document.getElementById('monthlyInstructorName').value.trim();
+  const hireDate = document.getElementById('monthlyInstructorHireDate').value || null;
+  const terminationDate = document.getElementById('monthlyInstructorTerminationDate').value || null;
+  const residentId = formatResidentId(document.getElementById('monthlyInstructorResidentId').value.trim());
+
+  if (!name) {
+    alert('이름을 입력해주세요.');
+    return;
+  }
+  if (hireDate && terminationDate && terminationDate < hireDate) {
+    alert('퇴사일은 입사일 이후여야 합니다.');
+    return;
+  }
+  if (residentId && !/^\d{6}-\d{7}$/.test(residentId)) {
+    alert('주민등록번호 형식을 확인해주세요. 예: 900101-1234567');
+    return;
+  }
+
+  updateMonthlyInstructor(id, {
+    name,
+    businessId: parseInt(document.getElementById('monthlyInstructorBusinessId').value, 10),
+    phoneNumber: document.getElementById('monthlyInstructorPhoneNumber').value.trim(),
+    residentId,
+    hireDate,
+    terminationDate,
+    position: getMonthlyInstructorPositionValue()
+  });
+
+  closeModal();
+  renderContent();
+  showToast('월급제 강사 정보가 수정되었습니다.');
+}
+
+function confirmDeleteMonthlyInstructor(id) {
+  if (!confirm('정말 삭제하시겠습니까? 월별 급여 입력 내역도 함께 삭제됩니다.')) {
+    return;
+  }
+  deleteMonthlyInstructor(id);
+  renderContent();
+  showToast('월급제 강사가 삭제되었습니다.');
+}
+
+function openMonthlyInstructorPayrollModal(id) {
+  const instructor = getMonthlyInstructorById(id);
+  const payroll = getMonthlyInstructorPayroll(id, selectedMonth);
+  const prev = getMonthlyInstructorPayroll(id, getPreviousMonthKey(selectedMonth));
+
+  document.getElementById('modalTitle').textContent = `${instructor.name} 월별 급여 입력`;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">${selectedMonth} 세전 지급액 *</label>
+      <input type="number" id="monthlyInstructorGrossPay" class="form-input" value="${payroll?.grossPay || ''}" min="0" step="10000" placeholder="예: 2500000">
+      ${prev?.grossPay ? `<small style="color: var(--text-light);">전월 세전 지급액: ${formatKRW(prev.grossPay)}</small>` : ''}
+    </div>
+    <div class="form-group">
+      <label class="form-label">추가 공제</label>
+      <input type="number" id="monthlyInstructorExtraDeduction" class="form-input" value="${payroll?.extraDeduction || 0}" min="0" step="1000" placeholder="없으면 0">
+      <small style="color: var(--text-light);">사업소득세 3.3% 외에 차감할 금액이 있을 때만 입력합니다.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">비고</label>
+      <textarea id="monthlyInstructorMemo" class="form-input" rows="3" placeholder="예: 성과급 포함, 교재비 공제">${payroll?.memo || ''}</textarea>
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">취소</button>
+    ${prev?.grossPay ? `<button class="btn btn-accent" onclick="copyPreviousMonthlyInstructorPayroll(${id})">전월 복사</button>` : ''}
+    <button class="btn btn-primary" onclick="saveMonthlyInstructorPayroll(${id})">저장</button>
+  `;
+  openModal();
+}
+
+function getPreviousMonthKey(monthKey) {
+  const [year, month] = monthKey.split('-').map(Number);
+  const date = new Date(year, month - 2, 1);
+  return getMonthKey(date);
+}
+
+function copyPreviousMonthlyInstructorPayroll(id) {
+  const prev = getMonthlyInstructorPayroll(id, getPreviousMonthKey(selectedMonth));
+  if (!prev) return;
+  document.getElementById('monthlyInstructorGrossPay').value = prev.grossPay || '';
+  document.getElementById('monthlyInstructorExtraDeduction').value = prev.extraDeduction || 0;
+  document.getElementById('monthlyInstructorMemo').value = prev.memo || '';
+}
+
+function saveMonthlyInstructorPayroll(id) {
+  const grossPay = parseInt(document.getElementById('monthlyInstructorGrossPay').value, 10) || 0;
+  const extraDeduction = parseInt(document.getElementById('monthlyInstructorExtraDeduction').value, 10) || 0;
+  const memo = document.getElementById('monthlyInstructorMemo').value.trim();
+
+  if (grossPay <= 0) {
+    alert('세전 지급액을 입력해주세요.');
+    return;
+  }
+  if (extraDeduction < 0) {
+    alert('추가 공제는 0원 이상이어야 합니다.');
+    return;
+  }
+
+  setMonthlyInstructorPayroll(id, selectedMonth, { grossPay, extraDeduction, memo });
+  closeModal();
+  renderContent();
+  showToast('월별 급여가 저장되었습니다.');
+}
+
 // ============ 근무기록 ============
 function getWorkLogSnapshot(logInfo) {
   return {
@@ -1927,6 +2291,7 @@ function renderPayroll(container) {
   // 선택된 사업장에 따라 직원/강사 필터링
   const filteredStaff = getStaffByBusiness(selectedBusiness);
   const filteredInstructors = getCommissionInstructorsByBusiness(selectedBusiness);
+  const filteredMonthlyInstructors = getMonthlyInstructorsByBusiness(selectedBusiness);
 
   let totalGross = 0;
   let totalDeductions = 0;
@@ -1958,6 +2323,18 @@ function renderPayroll(container) {
     totalNet += calc.netPay;
 
     return { instructor, calc, type: 'commission' };
+  }).filter(item => item !== null);
+
+  const monthlyInstructorPayrollData = filteredMonthlyInstructors.map(instructor => {
+    const payroll = getMonthlyInstructorPayroll(instructor.id, selectedMonth);
+    if (!payroll || payroll.grossPay <= 0) return null;
+
+    const calc = calculateMonthlyInstructorPayroll(payroll.grossPay, appData.settings, payroll.extraDeduction);
+    totalGross += calc.grossPay;
+    totalDeductions += calc.totalDeduction;
+    totalNet += calc.netPay;
+
+    return { instructor, payroll, calc, type: 'monthlyInstructor' };
   }).filter(item => item !== null);
 
   // 사업장 이름 표시
@@ -2098,7 +2475,49 @@ function renderPayroll(container) {
     </div>
     ` : ''}
 
-    ${hourlyPayrollData.length === 0 && commissionPayrollData.length === 0 ? `
+    ${monthlyInstructorPayrollData.length > 0 ? `
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">월급제 3.3% 강사 정산</h3>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>이름</th>
+              <th>주민번호</th>
+              <th>소속</th>
+              <th>세전 지급액</th>
+              <th>사업소득세</th>
+              <th>추가 공제</th>
+              <th>실지급</th>
+              <th>비고</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${monthlyInstructorPayrollData.map(item => {
+              const { instructor, payroll, calc } = item;
+              const businessName = getBusinessName(instructor.businessId);
+              return `
+                <tr>
+                  <td><strong>${instructor.name}</strong></td>
+                  <td style="font-family: monospace; font-size: 0.8125rem;">${instructor.residentId || '-'}</td>
+                  <td><span class="badge badge-business">${businessName}</span></td>
+                  <td>${formatKRW(calc.grossPay)}</td>
+                  <td style="color: var(--danger);">-${formatKRW(calc.incomeTax)}</td>
+                  <td style="color: var(--danger);">${calc.extraDeduction > 0 ? '-' + formatKRW(calc.extraDeduction) : '-'}</td>
+                  <td><strong style="color: var(--success);">${formatKRW(calc.netPay)}</strong></td>
+                  <td style="font-size: 0.8125rem;">${payroll.memo || '-'}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
+
+    ${hourlyPayrollData.length === 0 && commissionPayrollData.length === 0 && monthlyInstructorPayrollData.length === 0 ? `
     <div class="card">
       <div class="empty-state">이 달의 급여 정산 데이터가 없습니다.</div>
     </div>
@@ -2380,6 +2799,10 @@ function renderMessages(container) {
     const students = getCommissionStudents(instructor.id, selectedMonth);
     return students.length > 0;
   });
+  const monthlyInstructorWithPayroll = getMonthlyInstructorsByBusiness(selectedBusiness).filter(instructor => {
+    const payroll = getMonthlyInstructorPayroll(instructor.id, selectedMonth);
+    return !!payroll && payroll.grossPay > 0;
+  });
 
   container.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
@@ -2460,6 +2883,42 @@ function renderMessages(container) {
     </div>
     ` : ''}
 
+    ${monthlyInstructorWithPayroll.length > 0 ? `
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">월급제 3.3% 강사 문자</h3>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>이름</th>
+              <th>세전</th>
+              <th>실지급액</th>
+              <th>문자생성</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${monthlyInstructorWithPayroll.map(instructor => {
+              const payroll = getMonthlyInstructorPayroll(instructor.id, selectedMonth);
+              const calc = calculateMonthlyInstructorPayroll(payroll.grossPay, appData.settings, payroll.extraDeduction);
+              return `
+                <tr>
+                  <td><strong>${instructor.name}</strong></td>
+                  <td>${formatKRW(calc.grossPay)}</td>
+                  <td><strong>${formatKRW(calc.netPay)}</strong></td>
+                  <td>
+                    <button class="btn btn-primary btn-sm" onclick="showMonthlyInstructorMessageModal(${instructor.id})">문자 보기</button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
+
     <div id="allMessagesContainer"></div>
   `;
 }
@@ -2522,6 +2981,34 @@ function showMessageModal(staffId) {
   openModal();
 }
 
+function showMonthlyInstructorMessageModal(instructorId) {
+  const instructor = getMonthlyInstructorById(instructorId);
+  const payroll = getMonthlyInstructorPayroll(instructorId, selectedMonth);
+  const calc = calculateMonthlyInstructorPayroll(payroll.grossPay, appData.settings, payroll.extraDeduction);
+  const message = generateMonthlyInstructorMessage(instructor, selectedMonth, calc, payroll);
+  const receiver = instructor?.phoneNumber || '';
+
+  document.getElementById('modalTitle').textContent = `${instructor.name} 급여 확인 문자`;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group">
+      <label class="form-label">수신번호</label>
+      <input type="text" id="smsReceiver" class="form-input" value="${receiver}" placeholder="숫자만 입력">
+      <small style="color: var(--text-light); font-size: 0.75rem;">월급제 강사 수정 화면에서 번호를 저장할 수 있습니다.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">문자 내용</label>
+      <textarea id="smsMessageText" class="form-input" rows="10">${message}</textarea>
+    </div>
+  `;
+  document.getElementById('modalFooter').innerHTML = `
+    <button class="btn btn-outline" onclick="closeModal()">닫기</button>
+    <button class="btn btn-success" onclick="copyMessage(\`${encodeURIComponent(message)}\`)">복사하기</button>
+    <button class="btn btn-outline" id="smsTestButton" onclick="sendSmsFromModal('monthlyInstructor', ${instructorId}, true)">테스트 발송</button>
+    <button class="btn btn-primary" id="smsSendButton" onclick="sendSmsFromModal('monthlyInstructor', ${instructorId}, false)">문자 보내기</button>
+  `;
+  openModal();
+}
+
 function copyMessage(encodedMessage) {
   const message = decodeURIComponent(encodedMessage);
   copyToClipboard(message);
@@ -2552,7 +3039,9 @@ async function sendSmsFromModal(targetType, targetId, isTest = false) {
 
   const target = targetType === 'staff'
     ? getStaffById(targetId)
-    : getCommissionInstructorById(targetId);
+    : targetType === 'commission'
+      ? getCommissionInstructorById(targetId)
+      : getMonthlyInstructorById(targetId);
 
   const recipientName = target?.name || (targetType === 'staff' ? '직원' : '강사');
   const button = document.getElementById(isTest ? 'smsTestButton' : 'smsSendButton');
@@ -2625,6 +3114,10 @@ function generateAllMessages() {
     const students = getCommissionStudents(instructor.id, selectedMonth);
     return students.length > 0;
   });
+  const monthlyInstructorWithPayroll = getMonthlyInstructorsByBusiness(selectedBusiness).filter(instructor => {
+    const payroll = getMonthlyInstructorPayroll(instructor.id, selectedMonth);
+    return !!payroll && payroll.grossPay > 0;
+  });
 
   let html = '<div class="card"><div class="card-header"><h3 class="card-title">전체 문자 목록</h3></div>';
 
@@ -2662,6 +3155,25 @@ function generateAllMessages() {
         <div style="margin: 1rem; padding: 1rem; background: var(--bg); border-radius: 10px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
             <strong>${instructor.name}</strong> <span style="color: var(--text-light); font-size: 0.875rem;">(${formatPercent(instructor.commissionRate)})</span>
+            <button class="btn btn-success btn-sm" onclick="copyMessage(\`${encodeURIComponent(message)}\`)">복사</button>
+          </div>
+          <div class="message-preview" style="font-size: 0.8125rem;">${message}</div>
+        </div>
+      `;
+    });
+  }
+
+  if (monthlyInstructorWithPayroll.length > 0) {
+    html += '<h4 style="padding: 1rem 1rem 0; color: var(--accent);">월급제 3.3% 강사</h4>';
+    monthlyInstructorWithPayroll.forEach(instructor => {
+      const payroll = getMonthlyInstructorPayroll(instructor.id, selectedMonth);
+      const calc = calculateMonthlyInstructorPayroll(payroll.grossPay, appData.settings, payroll.extraDeduction);
+      const message = generateMonthlyInstructorMessage(instructor, selectedMonth, calc, payroll);
+
+      html += `
+        <div style="margin: 1rem; padding: 1rem; background: var(--bg); border-radius: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <strong>${instructor.name}</strong>
             <button class="btn btn-success btn-sm" onclick="copyMessage(\`${encodeURIComponent(message)}\`)">복사</button>
           </div>
           <div class="message-preview" style="font-size: 0.8125rem;">${message}</div>

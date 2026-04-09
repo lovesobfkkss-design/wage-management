@@ -208,6 +208,26 @@ function calculateInsurancePayroll(monthlySalary, absentDays = 0) {
   };
 }
 
+function calculateMonthlyInstructorPayroll(grossPay, settings, extraDeduction = 0) {
+  const normalizedGrossPay = Math.max(0, parseInt(grossPay, 10) || 0);
+  const normalizedExtraDeduction = Math.max(0, parseInt(extraDeduction, 10) || 0);
+  const incomeTax = Math.round(normalizedGrossPay * (settings?.instructorDeduction || 0.033));
+  const totalDeduction = incomeTax + normalizedExtraDeduction;
+  const netPay = Math.max(0, normalizedGrossPay - totalDeduction);
+
+  return {
+    grossPay: normalizedGrossPay,
+    incomeTax,
+    extraDeduction: normalizedExtraDeduction,
+    totalDeduction,
+    netPay,
+    breakdown: [
+      { name: '사업소득세', amount: incomeTax, rate: '3.3%' },
+      { name: '추가 공제', amount: normalizedExtraDeduction, rate: '직접입력' }
+    ]
+  };
+}
+
 // ============ 비율제 강사 정산 계산 ============
 
 /**
@@ -632,6 +652,25 @@ function generateInsuranceMessage(teacher, monthKey, calc) {
   });
   message += `\n총 공제액: -${formatKRW(calc.totalDeduction)}\n`;
   message += `→ 최종 지급예정액: ${formatKRW(calc.finalNetPay)}\n\n`;
+  message += `맞는지 확인 후 답변 부탁드립니다.`;
+
+  return message;
+}
+
+function generateMonthlyInstructorMessage(instructor, monthKey, calc, payroll = null) {
+  const { month } = parseMonthKey(monthKey);
+
+  let message = `[${month}월 급여 정산 확인 요청]\n`;
+  message += `${instructor.name}님, ${month}월 급여 정산 내역 공유드립니다.\n\n`;
+  message += `• 월 지급총액(세전): ${formatKRW(calc.grossPay)}\n`;
+  message += `• 사업소득세(3.3%): -${formatKRW(calc.incomeTax)}\n`;
+  if (calc.extraDeduction > 0) {
+    message += `• 추가 공제: -${formatKRW(calc.extraDeduction)}\n`;
+  }
+  if (payroll?.memo) {
+    message += `• 비고: ${payroll.memo}\n`;
+  }
+  message += `\n→ 최종 지급예정액: ${formatKRW(calc.netPay)}\n\n`;
   message += `맞는지 확인 후 답변 부탁드립니다.`;
 
   return message;
