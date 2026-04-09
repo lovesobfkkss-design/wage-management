@@ -48,6 +48,7 @@ function createStaffPayslipHTML(staff, monthKey, logs, wage, ded) {
         <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[직원 정보]</h3>
         <p style="margin: 4px 0; font-size: 13px;">이름: ${staff.name}</p>
         <p style="margin: 4px 0; font-size: 13px;">직급: ${typeName}</p>
+        <p style="margin: 4px 0; font-size: 13px;">주민등록번호: ${staff.residentId || '-'}</p>
       </div>
 
       <div style="margin-bottom: 20px;">
@@ -136,6 +137,7 @@ function createCommissionPayslipHTML(instructor, monthKey, students, calc) {
       <div style="margin-bottom: 20px;">
         <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[강사 정보]</h3>
         <p style="margin: 4px 0; font-size: 13px;">이름: ${instructor.name}</p>
+        <p style="margin: 4px 0; font-size: 13px;">주민등록번호: ${instructor.residentId || '-'}</p>
         <p style="margin: 4px 0; font-size: 13px;">정산비율: ${instructor.commissionRate * 100}%</p>
         <p style="margin: 4px 0; font-size: 13px;">담당학생: ${students.length}명</p>
       </div>

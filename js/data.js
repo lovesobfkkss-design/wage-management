@@ -24,20 +24,20 @@ function getDefaultData() {
     // 시급제 직원 (조교, 파트강사)
     staff: [
       // 시급제 조교들 - 기본값으로 강한영어수학학원(id:2) 소속
-      { id: 1, name: '박태균', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000, businessId: 2 },
-      { id: 2, name: '김시연', type: 'assistant', hourlyRate: 12000, tier1Hours: 3, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2 },
-      { id: 3, name: '이재준', type: 'assistant', hourlyRate: 12000, tier1Hours: 4, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2 },
-      { id: 4, name: '이예원', type: 'assistant', hourlyRate: 12000, tier1Hours: 5, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2 },
-      { id: 5, name: '김은재', type: 'assistant', hourlyRate: 12000, tier1Hours: 3, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2 },
-      { id: 6, name: '김주은', type: 'assistant', hourlyRate: 12000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 12000, businessId: 2 },
-      { id: 7, name: '인지원', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000, businessId: 2 },
-      { id: 8, name: '김세희', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000, businessId: 2 },
-      { id: 9, name: '홍대현', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000, businessId: 2 },
-      { id: 10, name: '박범수', type: 'assistant', hourlyRate: 12000, tier1Hours: 6, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2 },
-      { id: 11, name: '박소은', type: 'assistant', hourlyRate: 12000, tier1Hours: 4, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2 },
+      { id: 1, name: '박태균', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000, businessId: 2, residentId: null },
+      { id: 2, name: '김시연', type: 'assistant', hourlyRate: 12000, tier1Hours: 3, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2, residentId: null },
+      { id: 3, name: '이재준', type: 'assistant', hourlyRate: 12000, tier1Hours: 4, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2, residentId: null },
+      { id: 4, name: '이예원', type: 'assistant', hourlyRate: 12000, tier1Hours: 5, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2, residentId: null },
+      { id: 5, name: '김은재', type: 'assistant', hourlyRate: 12000, tier1Hours: 3, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2, residentId: null },
+      { id: 6, name: '김주은', type: 'assistant', hourlyRate: 12000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 12000, businessId: 2, residentId: null },
+      { id: 7, name: '인지원', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000, businessId: 2, residentId: null },
+      { id: 8, name: '김세희', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000, businessId: 2, residentId: null },
+      { id: 9, name: '홍대현', type: 'assistant', hourlyRate: 13000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 13000, businessId: 2, residentId: null },
+      { id: 10, name: '박범수', type: 'assistant', hourlyRate: 12000, tier1Hours: 6, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2, residentId: null },
+      { id: 11, name: '박소은', type: 'assistant', hourlyRate: 12000, tier1Hours: 4, tier1Rate: MINIMUM_WAGE, tier2Rate: 12000, businessId: 2, residentId: null },
       // 시급제 파트강사들
-      { id: 14, name: '김준경', type: 'partInstructor', hourlyRate: 25000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 25000, roundingRule: 'hour', businessId: 2 },
-      { id: 15, name: '오혜림', type: 'partInstructor', hourlyRate: 25000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 25000, roundingRule: 'half', businessId: 2 },
+      { id: 14, name: '김준경', type: 'partInstructor', hourlyRate: 25000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 25000, roundingRule: 'hour', businessId: 2, residentId: null },
+      { id: 15, name: '오혜림', type: 'partInstructor', hourlyRate: 25000, tier1Hours: 0, tier1Rate: 0, tier2Rate: 25000, roundingRule: 'half', businessId: 2, residentId: null },
     ],
     // 근무 기록 (시급제)
     workLogs: [],
@@ -107,11 +107,13 @@ function ensureDataCompatibility(data) {
     if (s.hireDate === undefined) s.hireDate = null;
     if (s.terminationDate === undefined) s.terminationDate = null;
     if (s.position === undefined) s.position = null;
+    if (s.residentId === undefined) s.residentId = null;
   });
   // 기존 비율제 강사에 businessId 없으면 기본값 할당
   data.commissionInstructors.forEach(i => {
     if (!i.businessId) i.businessId = 2;
     if (i.phoneNumber === undefined) i.phoneNumber = '';
+    if (i.residentId === undefined) i.residentId = null;
   });
   data.commissionStudents.forEach(record => {
     if (!Array.isArray(record.students)) record.students = [];
@@ -1008,7 +1010,9 @@ function addCommissionInstructor(info) {
     id: newId,
     name: info.name,
     commissionRate: info.commissionRate, // 강사 몫 비율 (0.5 = 50%)
-    businessId: info.businessId // 소속 사업장
+    businessId: info.businessId, // 소속 사업장
+    phoneNumber: info.phoneNumber || '',
+    residentId: info.residentId || null
   };
   appData.commissionInstructors.push(newInstructor);
   saveData(appData);

@@ -379,6 +379,7 @@ function renderDashboard(container) {
           <thead>
             <tr>
               <th>이름</th>
+              <th>주민번호</th>
               <th>소속</th>
               <th>유형</th>
               <th>근무/수강료</th>
@@ -398,6 +399,7 @@ function renderDashboard(container) {
               return `
                 <tr>
                   <td><strong>${staff.name}</strong></td>
+                  <td style="font-family: monospace; font-size: 0.8125rem;">${staff.residentId || '-'}</td>
                   <td><span class="badge badge-business">${businessName}</span></td>
                   <td><span class="badge ${staff.type === 'assistant' ? 'badge-assistant' : 'badge-instructor'}">${typeName}</span></td>
                   <td>${formatHours(totalHours)}</td>
@@ -414,6 +416,7 @@ function renderDashboard(container) {
               return `
                 <tr>
                   <td><strong>${instructor.name}</strong></td>
+                  <td style="font-family: monospace; font-size: 0.8125rem;">${instructor.residentId || '-'}</td>
                   <td><span class="badge badge-business">${businessName}</span></td>
                   <td><span class="badge badge-part">비율제</span></td>
                   <td>${calc ? formatKRW(calc.totalTuition) : '-'}</td>
@@ -461,6 +464,7 @@ function renderStaffManagement(container) {
           <thead>
             <tr>
               <th>이름</th>
+              <th>주민번호</th>
               <th>소속</th>
               <th>로그인ID</th>
               <th>직급</th>
@@ -495,6 +499,7 @@ function renderStaffManagement(container) {
                     <strong style="${nameStyle}">${staff.name}</strong>
                     ${isTerminated ? '<span class="badge" style="background: #ffebee; color: #c62828; margin-left: 0.5rem; font-size: 0.7rem;">퇴사</span>' : ''}
                   </td>
+                  <td style="font-family: monospace; font-size: 0.8125rem;">${staff.residentId || '-'}</td>
                   <td><span class="badge badge-business">${businessName}</span></td>
                   <td style="font-size: 0.8125rem;">${staff.loginId || '-'}</td>
                   <td>${positionDisplay}</td>
@@ -575,6 +580,17 @@ function getStaffFormHTML(staff = null, options = {}) {
       <div class="form-group">
         <label class="form-label">휴대폰 번호</label>
         <input type="text" id="staffPhoneNumber" class="form-input" value="${staff?.phoneNumber || ''}" placeholder="숫자만 입력">
+      </div>
+      <div class="form-group">
+        <label class="form-label">주민등록번호</label>
+        <input
+          type="text"
+          id="staffResidentId"
+          class="form-input"
+          value="${formatResidentId(staff?.residentId || '')}"
+          placeholder="예: 900101-1234567"
+          maxlength="14"
+        >
       </div>
     </div>
     <div class="form-row">
@@ -682,9 +698,15 @@ function saveNewStaff() {
   // 입사일/퇴사일 유효성 검증
   const hireDate = document.getElementById('staffHireDate').value || null;
   const terminationDate = document.getElementById('staffTerminationDate').value || null;
+  const residentId = formatResidentId(document.getElementById('staffResidentId').value.trim());
 
   if (hireDate && terminationDate && terminationDate < hireDate) {
     alert('퇴사일은 입사일 이후여야 합니다.');
+    return;
+  }
+
+  if (residentId && !/^\d{6}-\d{7}$/.test(residentId)) {
+    alert('주민등록번호 형식을 확인해주세요. 예: 900101-1234567');
     return;
   }
 
@@ -692,6 +714,7 @@ function saveNewStaff() {
     name,
     loginId: document.getElementById('staffLoginId').value.trim() || name,
     phoneNumber: document.getElementById('staffPhoneNumber').value.trim(),
+    residentId,
     businessId: parseInt(document.getElementById('staffBusinessId').value),
     type: document.getElementById('staffType').value,
     hourlyRate: parseInt(document.getElementById('tier2Rate').value) || 12000,
@@ -720,9 +743,15 @@ function saveEditStaff(staffId) {
   // 입사일/퇴사일 유효성 검증
   const hireDate = document.getElementById('staffHireDate').value || null;
   const terminationDate = document.getElementById('staffTerminationDate').value || null;
+  const residentId = formatResidentId(document.getElementById('staffResidentId').value.trim());
 
   if (hireDate && terminationDate && terminationDate < hireDate) {
     alert('퇴사일은 입사일 이후여야 합니다.');
+    return;
+  }
+
+  if (residentId && !/^\d{6}-\d{7}$/.test(residentId)) {
+    alert('주민등록번호 형식을 확인해주세요. 예: 900101-1234567');
     return;
   }
 
@@ -730,6 +759,7 @@ function saveEditStaff(staffId) {
     name,
     loginId: document.getElementById('staffLoginId').value.trim() || name,
     phoneNumber: document.getElementById('staffPhoneNumber').value.trim(),
+    residentId,
     businessId: parseInt(document.getElementById('staffBusinessId').value),
     type: document.getElementById('staffType').value,
     hourlyRate: parseInt(document.getElementById('tier2Rate').value) || 12000,
@@ -784,6 +814,7 @@ function renderCommissionInstructors(container) {
           <thead>
             <tr>
               <th>이름</th>
+              <th>주민번호</th>
               <th>소속</th>
               <th>비율</th>
               <th>${month}월 학생수</th>
@@ -800,6 +831,7 @@ function renderCommissionInstructors(container) {
               return `
                 <tr>
                   <td><strong>${instructor.name}</strong></td>
+                  <td style="font-family: monospace; font-size: 0.8125rem;">${instructor.residentId || '-'}</td>
                   <td><span class="badge badge-business">${businessName}</span></td>
                   <td><span class="badge badge-part">${formatPercent(instructor.commissionRate)}</span></td>
                   <td>${students.length}명</td>
@@ -814,7 +846,7 @@ function renderCommissionInstructors(container) {
                   </td>
                 </tr>
               `;
-            }).join('') : '<tr><td colspan="7" class="empty-state">등록된 비율제 강사가 없습니다.</td></tr>'}
+            }).join('') : '<tr><td colspan="8" class="empty-state">등록된 비율제 강사가 없습니다.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -852,6 +884,17 @@ function openAddCommissionInstructorModal() {
     <div class="form-group">
       <label class="form-label">휴대폰 번호</label>
       <input type="text" id="commInstructorPhoneNumber" class="form-input" placeholder="숫자만 입력">
+    </div>
+    <div class="form-group">
+      <label class="form-label">주민등록번호</label>
+      <input
+        type="text"
+        id="commInstructorResidentId"
+        class="form-input"
+        placeholder="예: 900101-1234567"
+        maxlength="14"
+      >
+      <small style="color: var(--text-light);">세무 처리용으로 바로 확인할 수 있게 저장됩니다.</small>
     </div>
     <div style="background: var(--bg); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
       <strong>공제 안내</strong>
@@ -896,6 +939,18 @@ function openEditCommissionInstructorModal(id) {
       <label class="form-label">휴대폰 번호</label>
       <input type="text" id="commInstructorPhoneNumber" class="form-input" value="${instructor.phoneNumber || ''}" placeholder="숫자만 입력">
     </div>
+    <div class="form-group">
+      <label class="form-label">주민등록번호</label>
+      <input
+        type="text"
+        id="commInstructorResidentId"
+        class="form-input"
+        value="${formatResidentId(instructor.residentId || '')}"
+        placeholder="예: 900101-1234567"
+        maxlength="14"
+      >
+      <small style="color: var(--text-light);">세무 처리용으로 바로 확인할 수 있게 저장됩니다.</small>
+    </div>
   `;
   document.getElementById('modalFooter').innerHTML = `
     <button class="btn btn-outline" onclick="closeModal()">취소</button>
@@ -908,6 +963,7 @@ function saveNewCommissionInstructor() {
   const name = document.getElementById('commInstructorName').value.trim();
   const ratePercent = parseInt(document.getElementById('commInstructorRate').value);
   const businessId = parseInt(document.getElementById('commInstructorBusinessId').value);
+  const residentId = formatResidentId(document.getElementById('commInstructorResidentId').value.trim());
 
   if (!name) {
     alert('이름을 입력해주세요.');
@@ -917,12 +973,17 @@ function saveNewCommissionInstructor() {
     alert('비율은 1~100 사이로 입력해주세요.');
     return;
   }
+  if (residentId && !/^\d{6}-\d{7}$/.test(residentId)) {
+    alert('주민등록번호 형식을 확인해주세요. 예: 900101-1234567');
+    return;
+  }
 
   addCommissionInstructor({
     name,
     commissionRate: ratePercent / 100,
     businessId,
-    phoneNumber: document.getElementById('commInstructorPhoneNumber').value.trim()
+    phoneNumber: document.getElementById('commInstructorPhoneNumber').value.trim(),
+    residentId
   });
 
   closeModal();
@@ -934,9 +995,18 @@ function saveEditCommissionInstructor(id) {
   const name = document.getElementById('commInstructorName').value.trim();
   const ratePercent = parseInt(document.getElementById('commInstructorRate').value);
   const businessId = parseInt(document.getElementById('commInstructorBusinessId').value);
+  const residentId = formatResidentId(document.getElementById('commInstructorResidentId').value.trim());
 
   if (!name) {
     alert('이름을 입력해주세요.');
+    return;
+  }
+  if (isNaN(ratePercent) || ratePercent < 1 || ratePercent > 100) {
+    alert('비율은 1~100 사이로 입력해주세요.');
+    return;
+  }
+  if (residentId && !/^\d{6}-\d{7}$/.test(residentId)) {
+    alert('주민등록번호 형식을 확인해주세요. 예: 900101-1234567');
     return;
   }
 
@@ -944,7 +1014,8 @@ function saveEditCommissionInstructor(id) {
     name,
     commissionRate: ratePercent / 100,
     businessId,
-    phoneNumber: document.getElementById('commInstructorPhoneNumber').value.trim()
+    phoneNumber: document.getElementById('commInstructorPhoneNumber').value.trim(),
+    residentId
   });
 
   closeModal();
@@ -1931,6 +2002,7 @@ function renderPayroll(container) {
           <thead>
             <tr>
               <th>이름</th>
+              <th>주민번호</th>
               <th>소속</th>
               <th>유형</th>
               <th>근무시간</th>
@@ -1949,6 +2021,7 @@ function renderPayroll(container) {
               return `
                 <tr>
                   <td><strong>${staff.name}</strong></td>
+                  <td style="font-family: monospace; font-size: 0.8125rem;">${staff.residentId || '-'}</td>
                   <td><span class="badge badge-business">${businessName}</span></td>
                   <td><span class="badge ${staff.type === 'assistant' ? 'badge-assistant' : 'badge-instructor'}">${typeName}</span></td>
                   <td>${formatHours(totalHours)}</td>
@@ -1983,6 +2056,7 @@ function renderPayroll(container) {
           <thead>
             <tr>
               <th>이름</th>
+              <th>주민번호</th>
               <th>소속</th>
               <th>비율</th>
               <th>학생수</th>
@@ -2000,6 +2074,7 @@ function renderPayroll(container) {
               return `
                 <tr>
                   <td><strong>${instructor.name}</strong></td>
+                  <td style="font-family: monospace; font-size: 0.8125rem;">${instructor.residentId || '-'}</td>
                   <td><span class="badge badge-business">${businessName}</span></td>
                   <td><span class="badge badge-part">${formatPercent(instructor.commissionRate)}</span></td>
                   <td>${calc.studentCount}명</td>
@@ -2065,6 +2140,10 @@ function showCommissionPayslip(instructorId) {
             <div class="payslip-row">
               <span>정산비율</span>
               <span>${formatPercent(instructor.commissionRate)}</span>
+            </div>
+            <div class="payslip-row">
+              <span>주민등록번호</span>
+              <span>${instructor.residentId || '-'}</span>
             </div>
           </div>
         </div>
@@ -2175,6 +2254,10 @@ function showPayslip(staffId) {
             <div class="payslip-row">
               <span>직종</span>
               <span>${typeName}</span>
+            </div>
+            <div class="payslip-row">
+              <span>주민등록번호</span>
+              <span>${staff.residentId || '-'}</span>
             </div>
           </div>
         </div>
@@ -3297,6 +3380,7 @@ function renderInsuranceTeachers(container) {
           <thead>
             <tr>
               <th>이름</th>
+              <th>주민번호</th>
               <th>소속</th>
               <th>직급</th>
               <th>월급여</th>
@@ -3323,6 +3407,7 @@ function renderInsuranceTeachers(container) {
                     <strong style="${nameStyle}">${teacher.name}</strong>
                     ${isTerminated ? '<span class="badge" style="background: #ffebee; color: #c62828; margin-left: 0.5rem; font-size: 0.7rem;">퇴사</span>' : ''}
                   </td>
+                  <td style="font-family: monospace; font-size: 0.8125rem;">${teacher.residentId || '-'}</td>
                   <td><span class="badge badge-business">${businessName}</span></td>
                   <td>${teacher.position || '-'}</td>
                   <td>${formatKRW(teacher.monthlySalary)}</td>
@@ -3351,7 +3436,7 @@ function renderInsuranceTeachers(container) {
                   </td>
                 </tr>
               `;
-            }).join('') : '<tr><td colspan="10" class="empty-state">등록된 4대보험 직원이 없습니다.</td></tr>'}
+            }).join('') : '<tr><td colspan="11" class="empty-state">등록된 4대보험 직원이 없습니다.</td></tr>'}
           </tbody>
         </table>
       </div>
