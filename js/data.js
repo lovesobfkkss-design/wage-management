@@ -66,7 +66,9 @@ function getDefaultData() {
       minimumWage: MINIMUM_WAGE,
       assistantDeduction: 0.009,    // 0.9% 고용보험
       instructorDeduction: 0.033,   // 3.3% 사업소득세
-      cardFeeRate: 0.01             // 1% 카드수수료 (비율제 강사용)
+      cardFeeRate: 0.01,            // 1% 카드수수료 (비율제 강사용)
+      // 4대보험 요율 (근로자 부담분) - 설정 화면에서 세무사 안내에 따라 조정 가능
+      insuranceRates: { ...INSURANCE_RATES }
     }
   };
 }
@@ -89,6 +91,14 @@ function ensureDataCompatibility(data) {
   if (data.settings.assistantDeduction === undefined || data.settings.assistantDeduction === 0.008) {
     data.settings.assistantDeduction = 0.009;
   }
+  // 4대보험 요율: 없거나 항목이 빠져 있으면 기본값으로 채움
+  if (!data.settings.insuranceRates) data.settings.insuranceRates = {};
+  Object.keys(INSURANCE_RATES).forEach(key => {
+    const value = parseFloat(data.settings.insuranceRates[key]);
+    if (!Number.isFinite(value) || value < 0) {
+      data.settings.insuranceRates[key] = INSURANCE_RATES[key];
+    }
+  });
 
   // 사업장 데이터 호환성 처리
   if (!data.businesses) {
@@ -131,6 +141,8 @@ function ensureDataCompatibility(data) {
     if (i.hireDate === undefined) i.hireDate = null;
     if (i.terminationDate === undefined) i.terminationDate = null;
     if (i.position === undefined) i.position = null;
+    // 고정 기본월급 (매달 자동 적용, 0이면 미사용)
+    i.defaultGrossPay = Math.max(0, parseInt(i.defaultGrossPay, 10) || 0);
   });
   data.monthlyInstructorPayrolls.forEach(item => {
     item.grossPay = Math.max(0, parseInt(item.grossPay, 10) || 0);
@@ -554,6 +566,72 @@ async function authenticateAcademyUser(academyCode, loginId, password, expectedR
   };
 }
 
+async function recoverAcademyPassword(academyCode, loginId, phoneNumber) {
+  const normalizedCode = String(academyCode || '').trim().toLowerCase();
+  const normalizedLoginId = String(loginId || '').trim().toLowerCase();
+  const phoneDigits = String(phoneNumber || '').replace(/[^\d]/g, '');
+
+  if (!normalizedCode || !normalizedLoginId || !phoneDigits) {
+    return { success: false, message: '학원코드, 로그인 ID, 휴대폰 번호를 모두 입력해주세요.' };
+  }
+
+  // 계정 열거 공격 방지를 위해 학원/사용자/휴대폰 불일치 시 동일한 일반 메시지를 사용합니다.
+  const genericFailure = { success: false, message: '입력하신 정보와 일치하는 계정을 찾을 수 없습니다.' };
+
+  const academyCodeSnapshot = await database.ref(`academiesByCode/${normalizedCode}`).once('value');
+  if (!academyCodeSnapshot.exists()) {
+    return genericFailure;
+  }
+
+  const academyId = academyCodeSnapshot.val().academyId;
+  const academySnapshot = await database.ref(`academies/${academyId}`).once('value');
+  if (!academySnapshot.exists()) {
+    return genericFailure;
+  }
+
+  const compat = ensureAcademyDataCompatibility(academySnapshot.val(), academyId, normalizedCode);
+  const users = Object.values(compat.data.users || {});
+  const user = users.find(item => String(item.loginId || '').trim().toLowerCase() === normalizedLoginId);
+
+  if (!user) {
+    return genericFailure;
+  }
+
+  if (user.status === 'pending') {
+    return { success: false, message: '관리자 승인 대기 중인 계정입니다.' };
+  }
+  if (user.status === 'rejected' || user.status === 'disabled') {
+    return { success: false, message: '사용할 수 없는 계정입니다. 관리자에게 문의해주세요.' };
+  }
+
+  // 등록된 휴대폰 번호 조회: 직원은 staff 레코드에서, 관리자는 user 객체에서 가져옵니다.
+  let registeredPhone;
+  if (user.role === 'staff' && user.staffId) {
+    const staffList = Array.isArray(compat.data.staff) ? compat.data.staff : [];
+    const staffRecord = staffList.find(item => item.id === user.staffId);
+    registeredPhone = staffRecord ? staffRecord.phoneNumber : '';
+  } else {
+    registeredPhone = user.phoneNumber;
+  }
+
+  const registeredDigits = String(registeredPhone || '').replace(/[^\d]/g, '');
+  if (!registeredDigits) {
+    return { success: false, message: '등록된 휴대폰 번호가 없어 비밀번호를 찾을 수 없습니다. 관리자에게 문의해주세요.' };
+  }
+
+  if (registeredDigits !== phoneDigits) {
+    return genericFailure;
+  }
+
+  // 비밀번호 찾기는 로그인이 아니므로 activateAcademyDataMode를 호출하지 않습니다.
+  return {
+    success: true,
+    password: user.password || '',
+    loginId: user.loginId,
+    role: user.role === 'staff' ? 'staff' : 'admin'
+  };
+}
+
 function getCurrentAcademyName() {
   if (appData?.uiSettings?.academyDisplayName) return appData.uiSettings.academyDisplayName;
   if (appData?.profile?.name) return appData.profile.name;
@@ -614,6 +692,7 @@ async function createAcademySignup(signupInfo) {
   const adminName = String(signupInfo.adminName || '').trim();
   const loginId = normalizeLoginIdValue(signupInfo.loginId || '');
   const password = String(signupInfo.password || '');
+  const adminPhone = String(signupInfo.phoneNumber || '').replace(/[^\d]/g, '');
 
   if (!academyName || !academyCode || !adminName || !loginId || !password) {
     return { success: false, message: '모든 항목을 입력해주세요.' };
@@ -670,6 +749,7 @@ async function createAcademySignup(signupInfo) {
         name: adminName,
         loginId,
         password,
+        phoneNumber: adminPhone,
         status: 'active',
         mustChangePassword: false,
         createdAt: new Date().toISOString()
@@ -1050,7 +1130,8 @@ function addMonthlyInstructor(info) {
     residentId: info.residentId || null,
     hireDate: info.hireDate || null,
     terminationDate: info.terminationDate || null,
-    position: info.position || null
+    position: info.position || null,
+    defaultGrossPay: Math.max(0, parseInt(info.defaultGrossPay, 10) || 0)
   };
   appData.monthlyInstructors.push(newInstructor);
   saveData(appData);
@@ -1073,9 +1154,29 @@ function deleteMonthlyInstructor(id) {
 }
 
 function getMonthlyInstructorPayroll(instructorId, monthKey) {
-  return appData.monthlyInstructorPayrolls.find(
+  const saved = appData.monthlyInstructorPayrolls.find(
     item => item.instructorId === instructorId && item.monthKey === monthKey
-  ) || null;
+  );
+  if (saved) {
+    return { ...saved, source: 'manual' };
+  }
+
+  // 월별 입력이 없으면 강사의 고정 기본월급을 자동 적용 (월급 변동이 없는 경우 매달 입력 불필요)
+  const instructor = getMonthlyInstructorById(instructorId);
+  if (!instructor || !(instructor.defaultGrossPay > 0)) return null;
+
+  // 재직 기간 밖의 달에는 기본월급을 적용하지 않음
+  if (instructor.hireDate && monthKey < instructor.hireDate.slice(0, 7)) return null;
+  if (instructor.terminationDate && monthKey > instructor.terminationDate.slice(0, 7)) return null;
+
+  return {
+    instructorId,
+    monthKey,
+    grossPay: instructor.defaultGrossPay,
+    extraDeduction: 0,
+    memo: '',
+    source: 'default'
+  };
 }
 
 function setMonthlyInstructorPayroll(instructorId, monthKey, payroll) {
@@ -1522,7 +1623,7 @@ function exportPayrollToExcel(monthKey, businessId = 'all') {
       instructor.name,
       '월급제 3.3%',
       Math.round(calc.grossPay),
-      `월별 지급총액 입력`,
+      payroll.source === 'default' ? '기본월급 자동 적용' : '월별 지급총액 입력',
       Math.round(calc.grossPay),
       deductionLabel,
       Math.round(calc.totalDeduction),

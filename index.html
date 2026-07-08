@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>강한영어수학학원 급여관리시스템</title>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/pretendard/1.3.9/static/pretendard.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=23">
 </head>
 <body>
   <!-- 로그인 화면 -->
@@ -64,6 +64,28 @@
           로그인 ID는 학원 관리자에게 확인하세요.
         </p>
       </div>
+
+      <div id="passwordRecovery" class="hidden">
+        <div class="form-group">
+          <label class="form-label">학원코드</label>
+          <input type="text" id="recoverAcademyCode" class="form-input" placeholder="예: ganghan" onkeypress="if(event.key==='Enter') recoverPassword()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">로그인 ID</label>
+          <input type="text" id="recoverLoginId" class="form-input" placeholder="로그인 ID" onkeypress="if(event.key==='Enter') recoverPassword()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">휴대폰 번호</label>
+          <input type="text" id="recoverPhone" class="form-input" placeholder="숫자만 입력" onkeypress="if(event.key==='Enter') recoverPassword()">
+        </div>
+        <button class="btn btn-primary" style="width:100%" onclick="recoverPassword()">비밀번호 찾기</button>
+        <div id="recoverResult" style="margin-top: 1rem;"></div>
+        <button class="btn btn-outline" style="width:100%; margin-top:0.75rem;" onclick="hidePasswordRecovery()">로그인으로 돌아가기</button>
+      </div>
+
+      <p style="text-align: center; margin-top: 1rem;">
+        <a href="javascript:void(0)" onclick="showPasswordRecovery()" style="font-size: 0.8rem; color: var(--text-light); text-decoration: underline; cursor: pointer;">비밀번호 찾기</a>
+      </p>
     </div>
   </div>
 
@@ -116,10 +138,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
   <!-- JavaScript 파일 로드 (순서 중요) -->
-  <script src="js/utils.js?v=20"></script>
-  <script src="js/firebase-config.js?v=20"></script>
-  <script src="js/data.js?v=20"></script>
-  <script src="js/pdf-generator.js?v=20"></script>
-  <script src="js/app.js?v=20"></script>
+  <script src="js/utils.js?v=23"></script>
+  <script src="js/firebase-config.js?v=23"></script>
+  <script src="js/data.js?v=23"></script>
+  <script src="js/pdf-generator.js?v=23"></script>
+  <script src="js/app.js?v=23"></script>
 </body>
 </html>

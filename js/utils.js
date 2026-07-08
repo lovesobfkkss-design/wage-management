@@ -102,11 +102,13 @@ function calculateDeduction(staff, grossPay, settings) {
 // ============ 4대보험 공제 계산 ============
 
 /**
- * 4대보험 공제율 (근로자 부담분)
+ * 4대보험 공제율 기본값 (2026년 기준, 근로자 부담분)
  * - 국민연금: 4.75%
  * - 건강보험: 3.595%
  * - 장기요양: 건강보험의 13.14%
  * - 고용보험: 0.9%
+ * 실제 적용 요율은 설정(appData.settings.insuranceRates)에서 조정할 수 있으며,
+ * 이 상수는 설정값이 없을 때의 기본값으로만 사용됩니다.
  */
 const INSURANCE_RATES = {
   nationalPension: 0.0475,      // 국민연금 4.75%
@@ -114,6 +116,26 @@ const INSURANCE_RATES = {
   longTermCare: 0.1314,         // 장기요양 13.14% (건강보험의)
   employmentInsurance: 0.009    // 고용보험 0.9%
 };
+
+// 설정에 저장된 요율을 우선 사용, 없으면 기본값
+function getActiveInsuranceRates() {
+  const saved = (typeof appData !== 'undefined' && appData?.settings?.insuranceRates) || {};
+  const pick = (value, fallback) => {
+    const num = parseFloat(value);
+    return Number.isFinite(num) && num >= 0 ? num : fallback;
+  };
+  return {
+    nationalPension: pick(saved.nationalPension, INSURANCE_RATES.nationalPension),
+    healthInsurance: pick(saved.healthInsurance, INSURANCE_RATES.healthInsurance),
+    longTermCare: pick(saved.longTermCare, INSURANCE_RATES.longTermCare),
+    employmentInsurance: pick(saved.employmentInsurance, INSURANCE_RATES.employmentInsurance)
+  };
+}
+
+// 요율 표시용 퍼센트 문자열 (예: 0.0475 → "4.75%")
+function formatRatePercent(rate) {
+  return parseFloat((rate * 100).toFixed(4)) + '%';
+}
 
 /**
  * 근로소득 간이세액표 (2026년 기준, 부양가족 1인 본인)
@@ -148,17 +170,19 @@ function getIncomeTax(monthlySalary) {
  * 4대보험 + 소득세 공제액 계산
  */
 function calculateInsuranceDeduction(monthlySalary) {
+  const rates = getActiveInsuranceRates();
+
   // 국민연금
-  const nationalPension = Math.round(monthlySalary * INSURANCE_RATES.nationalPension);
+  const nationalPension = Math.round(monthlySalary * rates.nationalPension);
 
   // 건강보험
-  const healthInsurance = Math.round(monthlySalary * INSURANCE_RATES.healthInsurance);
+  const healthInsurance = Math.round(monthlySalary * rates.healthInsurance);
 
-  // 장기요양보험 (건강보험료의 13.14%)
-  const longTermCare = Math.round(healthInsurance * INSURANCE_RATES.longTermCare);
+  // 장기요양보험 (건강보험료의 일정 비율)
+  const longTermCare = Math.round(healthInsurance * rates.longTermCare);
 
   // 고용보험
-  const employmentInsurance = Math.round(monthlySalary * INSURANCE_RATES.employmentInsurance);
+  const employmentInsurance = Math.round(monthlySalary * rates.employmentInsurance);
 
   // 소득세 (간이세액표 기준)
   const incomeTax = getIncomeTax(monthlySalary);
@@ -182,11 +206,12 @@ function calculateInsuranceDeduction(monthlySalary) {
     localIncomeTax,
     totalDeduction,
     netPay,
+    rates,
     breakdown: [
-      { name: '국민연금', amount: nationalPension, rate: '4.75%' },
-      { name: '건강보험', amount: healthInsurance, rate: '3.595%' },
-      { name: '장기요양', amount: longTermCare, rate: '건강보험의 13.14%' },
-      { name: '고용보험', amount: employmentInsurance, rate: '0.9%' },
+      { name: '국민연금', amount: nationalPension, rate: formatRatePercent(rates.nationalPension) },
+      { name: '건강보험', amount: healthInsurance, rate: formatRatePercent(rates.healthInsurance) },
+      { name: '장기요양', amount: longTermCare, rate: '건강보험의 ' + formatRatePercent(rates.longTermCare) },
+      { name: '고용보험', amount: employmentInsurance, rate: formatRatePercent(rates.employmentInsurance) },
       { name: '소득세', amount: incomeTax, rate: '간이세액' },
       { name: '지방소득세', amount: localIncomeTax, rate: '소득세의 10%' }
     ]

@@ -23,6 +23,54 @@ function selectRole(role, button) {
   document.getElementById('staffLogin').classList.toggle('hidden', role !== 'staff');
 }
 
+// ============ 비밀번호 찾기 ============
+function showPasswordRecovery() {
+  document.getElementById('adminLogin').classList.add('hidden');
+  document.getElementById('staffLogin').classList.add('hidden');
+  document.querySelector('.role-selector').classList.add('hidden');
+  document.getElementById('passwordRecovery').classList.remove('hidden');
+  document.getElementById('recoverResult').innerHTML = '';
+}
+
+function hidePasswordRecovery() {
+  // 비밀번호 찾기 패널 숨기고 역할 선택 화면 복원
+  document.getElementById('passwordRecovery').classList.add('hidden');
+  document.querySelector('.role-selector').classList.remove('hidden');
+  document.getElementById('adminLogin').classList.toggle('hidden', selectedRole !== 'admin');
+  document.getElementById('staffLogin').classList.toggle('hidden', selectedRole !== 'staff');
+
+  // 입력값 및 결과 초기화
+  document.getElementById('recoverAcademyCode').value = '';
+  document.getElementById('recoverLoginId').value = '';
+  document.getElementById('recoverPhone').value = '';
+  document.getElementById('recoverResult').innerHTML = '';
+}
+
+async function recoverPassword() {
+  const academyCode = document.getElementById('recoverAcademyCode').value;
+  const loginId = document.getElementById('recoverLoginId').value;
+  const phoneNumber = document.getElementById('recoverPhone').value;
+  const resultEl = document.getElementById('recoverResult');
+
+  const result = await recoverAcademyPassword(academyCode, loginId, phoneNumber);
+
+  if (!result.success) {
+    resultEl.innerHTML = `<p style="color: var(--danger, #e53e3e); font-size: 0.875rem; text-align: center;">${result.message}</p>`;
+    return;
+  }
+
+  // 자동 로그인하지 않고 정보만 표시
+  resultEl.innerHTML = `
+    <div style="padding: 0.875rem 1rem; background: var(--bg); border-radius: 10px; font-size: 0.9rem; text-align: center;">
+      <div>로그인 ID: <strong>${result.loginId}</strong></div>
+      <div>비밀번호: <strong style="font-size: 1.1rem; color: var(--primary);">${result.password}</strong></div>
+      <p style="font-size: 0.75rem; color: var(--text-light); margin-top: 0.5rem;">
+        위 정보로 로그인한 뒤 비밀번호를 변경해 주세요.
+      </p>
+    </div>
+  `;
+}
+
 function populateStaffSelect() {
   const select = document.getElementById('staffSelect');
   if (!select) return;
@@ -109,6 +157,10 @@ function openAcademySignupModal() {
       <label class="form-label">비밀번호 *</label>
       <input type="password" id="signupAdminPassword" class="form-input" placeholder="비밀번호">
     </div>
+    <div class="form-group">
+      <label class="form-label">휴대폰 번호</label>
+      <input type="text" id="signupAdminPhone" class="form-input" placeholder="숫자만 입력, 비밀번호 찾기에 사용됩니다">
+    </div>
   `;
   document.getElementById('modalFooter').innerHTML = `
     <button class="btn btn-outline" onclick="closeModal()">취소</button>
@@ -123,7 +175,8 @@ async function submitAcademySignup() {
     academyCode: document.getElementById('signupAcademyCode').value,
     adminName: document.getElementById('signupAdminName').value,
     loginId: document.getElementById('signupAdminLoginId').value,
-    password: document.getElementById('signupAdminPassword').value
+    password: document.getElementById('signupAdminPassword').value,
+    phoneNumber: document.getElementById('signupAdminPhone').value
   });
 
   if (!result.success) {
@@ -318,11 +371,12 @@ function renderDashboard(container) {
   const filteredStaff = getStaffByBusiness(selectedBusiness).filter(staff => !staff.terminationDate);
   const filteredInstructors = getCommissionInstructorsByBusiness(selectedBusiness);
   const filteredMonthlyInstructors = getMonthlyInstructorsByBusiness(selectedBusiness).filter(instructor => !instructor.terminationDate);
+  const filteredInsuranceTeachers = getInsuranceTeachersByBusiness(selectedBusiness).filter(teacher => !teacher.terminationDate);
 
   let totalGross = 0;
   let totalNet = 0;
   let totalDeductions = 0;
-  const staffCount = filteredStaff.length + filteredInstructors.length + filteredMonthlyInstructors.length;
+  const staffCount = filteredStaff.length + filteredInstructors.length + filteredMonthlyInstructors.length + filteredInsuranceTeachers.length;
 
   // 시급제 직원 계산
   filteredStaff.forEach(staff => {
@@ -355,6 +409,15 @@ function renderDashboard(container) {
     totalNet += calc.netPay;
   });
 
+  // 4대보험 직원 계산 (결근 반영)
+  filteredInsuranceTeachers.forEach(teacher => {
+    const absentDays = getInsuranceAbsenceDays(teacher.id, monthKey);
+    const calc = calculateInsurancePayroll(teacher.monthlySalary, absentDays);
+    totalGross += calc.monthlySalary;
+    totalDeductions += calc.totalDeduction + calc.absenceDeduction;
+    totalNet += calc.finalNetPay;
+  });
+
   // 사업장 이름 표시
   const businessTitle = selectedBusiness === 'all' ? '전체' : getBusinessName(selectedBusiness);
 
@@ -375,12 +438,12 @@ function renderDashboard(container) {
       <div class="summary-card">
         <div class="summary-label" style="color: var(--text-light);">총 공제액</div>
         <div class="summary-value" style="color: var(--danger);">${formatKRW(totalDeductions)}</div>
-        <div class="summary-sub" style="color: var(--text-light);">고용보험 + 사업소득세</div>
+        <div class="summary-sub" style="color: var(--text-light);">고용보험·사업소득세·4대보험</div>
       </div>
       <div class="summary-card">
         <div class="summary-label" style="color: var(--text-light);">등록 직원수</div>
         <div class="summary-value" style="color: var(--primary);">${staffCount}명</div>
-        <div class="summary-sub" style="color: var(--text-light);">시급제 + 비율제</div>
+        <div class="summary-sub" style="color: var(--text-light);">시급제·비율제·월급제·4대보험</div>
       </div>
     </div>
 
@@ -457,6 +520,23 @@ function renderDashboard(container) {
                 </tr>
               `;
             }).join('')}
+            ${filteredInsuranceTeachers.map(teacher => {
+              const absentDays = getInsuranceAbsenceDays(teacher.id, monthKey);
+              const calc = calculateInsurancePayroll(teacher.monthlySalary, absentDays);
+              const businessName = getBusinessName(teacher.businessId);
+              return `
+                <tr>
+                  <td><strong>${teacher.name}</strong></td>
+                  <td style="font-family: monospace; font-size: 0.8125rem;">${teacher.residentId || '-'}</td>
+                  <td><span class="badge badge-business">${businessName}</span></td>
+                  <td><span class="badge badge-assistant">4대보험</span></td>
+                  <td>${absentDays > 0 ? `결근 ${absentDays}일` : '-'}</td>
+                  <td>${formatKRW(calc.monthlySalary)}</td>
+                  <td style="color: var(--danger);">-${formatKRW(calc.totalDeduction + calc.absenceDeduction)}</td>
+                  <td><strong>${formatKRW(calc.finalNetPay)}</strong></td>
+                </tr>
+              `;
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -502,6 +582,7 @@ function renderStaffManagement(container) {
               <th>유형</th>
               <th>시급 정보</th>
               <th>입사일</th>
+              <th>퇴사일</th>
               <th>공제 유형</th>
               <th>관리</th>
             </tr>
@@ -523,6 +604,7 @@ function renderStaffManagement(container) {
               const businessName = getBusinessName(staff.businessId);
               const positionDisplay = staff.position || '-';
               const hireDateDisplay = staff.hireDate || '-';
+              const terminationDateDisplay = staff.terminationDate || '-';
 
               return `
                 <tr style="${rowStyle}">
@@ -537,6 +619,7 @@ function renderStaffManagement(container) {
                   <td><span class="badge ${staff.type === 'assistant' ? 'badge-assistant' : 'badge-instructor'}">${typeName}</span></td>
                   <td style="font-size: 0.8125rem;">${wageInfo}</td>
                   <td style="font-size: 0.8125rem;">${hireDateDisplay}</td>
+                  <td style="font-size: 0.8125rem; color: ${isTerminated ? 'var(--danger)' : 'inherit'};">${terminationDateDisplay}</td>
                   <td style="font-size: 0.8125rem;">${deductionType}</td>
                   <td>
                     <div class="actions">
@@ -1424,11 +1507,16 @@ function getMonthlyInstructorFormHTML(instructor = null) {
         <input type="date" id="monthlyInstructorTerminationDate" class="form-input" value="${instructor?.terminationDate || ''}">
       </div>
     </div>
+    <div class="form-group">
+      <label class="form-label">기본 월급 (세전, 고정)</label>
+      <input type="number" id="monthlyInstructorDefaultGrossPay" class="form-input" value="${instructor?.defaultGrossPay || ''}" min="0" step="10000" placeholder="예: 2500000 (비워두면 매달 직접 입력)">
+      <small style="color: var(--text-light);">입력해두면 매달 별도 입력 없이 이 금액이 자동 적용됩니다. 금액이 다른 달에만 "월급입력"으로 수정하세요.</small>
+    </div>
     <div style="background: var(--bg); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
       <strong>정산 방식 안내</strong>
       <p style="font-size: 0.875rem; color: var(--text-light); margin-top: 0.5rem;">
-        월별 세전 지급액을 직접 입력하고, 사업소득세 3.3%를 자동 공제합니다.<br>
-        추가 공제가 있으면 해당 월에만 별도로 입력할 수 있습니다.
+        기본 월급을 설정하면 매달 자동 적용되고, 사업소득세 ${formatRatePercent(appData.settings.instructorDeduction || 0.033)}가 자동 공제됩니다.<br>
+        특정 달만 금액이 다르거나 추가 공제가 있으면 해당 월에 "월급입력"으로 직접 입력하세요. (직접 입력이 기본 월급보다 우선)
       </p>
     </div>
   `;
@@ -1462,6 +1550,9 @@ function renderMonthlyInstructors(container) {
       <div class="card-header">
         <h3 class="card-title">등록된 월급제 3.3% 강사 (${filteredInstructors.length}명)</h3>
       </div>
+      <div style="padding: 0 1.5rem 0.75rem; color: var(--text-light); font-size: 0.875rem;">
+        <span class="badge" style="background: #e8f5e9; color: #2e7d32; font-size: 0.7rem;">자동</span> 표시는 강사 정보의 <strong style="color: var(--text);">기본 월급</strong>이 자동 적용된 달입니다. 금액이 다른 달만 "월급입력"으로 수정하세요.
+      </div>
       <div class="table-container">
         <table>
           <thead>
@@ -1470,44 +1561,71 @@ function renderMonthlyInstructors(container) {
               <th>주민번호</th>
               <th>소속</th>
               <th>직급</th>
+              <th>기본월급</th>
               <th>${month}월 세전</th>
               <th>${month}월 공제</th>
               <th>${month}월 실지급</th>
               <th>입사일</th>
+              <th>퇴사일</th>
               <th>관리</th>
             </tr>
           </thead>
           <tbody>
-            ${filteredInstructors.length > 0 ? filteredInstructors.map(instructor => {
-              const isTerminated = !!instructor.terminationDate;
-              const rowStyle = isTerminated ? 'background: #fafafa; opacity: 0.7;' : '';
-              const nameStyle = isTerminated ? 'text-decoration: line-through; color: var(--text-light);' : '';
-              const payroll = getMonthlyInstructorPayroll(instructor.id, selectedMonth);
-              const calc = payroll ? calculateMonthlyInstructorPayroll(payroll.grossPay, appData.settings, payroll.extraDeduction) : null;
-              const businessName = getBusinessName(instructor.businessId);
-              return `
-                <tr style="${rowStyle}">
-                  <td>
-                    <strong style="${nameStyle}">${instructor.name}</strong>
-                    ${isTerminated ? '<span class="badge" style="background: #ffebee; color: #c62828; margin-left: 0.5rem; font-size: 0.7rem;">퇴사</span>' : ''}
-                  </td>
-                  <td style="font-family: monospace; font-size: 0.8125rem;">${instructor.residentId || '-'}</td>
-                  <td><span class="badge badge-business">${businessName}</span></td>
-                  <td>${instructor.position || '-'}</td>
-                  <td>${calc ? formatKRW(calc.grossPay) : '미입력'}</td>
-                  <td style="color: var(--danger);">${calc ? '-' + formatKRW(calc.totalDeduction) : '-'}</td>
-                  <td><strong style="color: var(--success);">${calc ? formatKRW(calc.netPay) : '-'}</strong></td>
-                  <td style="font-size: 0.8125rem;">${instructor.hireDate || '-'}</td>
-                  <td>
-                    <div class="actions">
-                      <button class="btn btn-primary btn-sm" onclick="openMonthlyInstructorPayrollModal(${instructor.id})">월급입력</button>
-                      <button class="btn btn-outline btn-sm" onclick="openEditMonthlyInstructorModal(${instructor.id})">수정</button>
-                      <button class="btn btn-danger btn-sm" onclick="confirmDeleteMonthlyInstructor(${instructor.id})">삭제</button>
-                    </div>
-                  </td>
+            ${filteredInstructors.length > 0 ? (() => {
+              let sumGross = 0, sumDeduction = 0, sumNet = 0;
+              const rows = filteredInstructors.map(instructor => {
+                const isTerminated = !!instructor.terminationDate;
+                const rowStyle = isTerminated ? 'background: #fafafa; opacity: 0.7;' : '';
+                const nameStyle = isTerminated ? 'text-decoration: line-through; color: var(--text-light);' : '';
+                const payroll = getMonthlyInstructorPayroll(instructor.id, selectedMonth);
+                const calc = payroll ? calculateMonthlyInstructorPayroll(payroll.grossPay, appData.settings, payroll.extraDeduction) : null;
+                const businessName = getBusinessName(instructor.businessId);
+                const terminationDateDisplay = instructor.terminationDate || '-';
+                const isAutoApplied = payroll?.source === 'default';
+                if (calc) {
+                  sumGross += calc.grossPay;
+                  sumDeduction += calc.totalDeduction;
+                  sumNet += calc.netPay;
+                }
+                return `
+                  <tr style="${rowStyle}">
+                    <td>
+                      <strong style="${nameStyle}">${instructor.name}</strong>
+                      ${isTerminated ? '<span class="badge" style="background: #ffebee; color: #c62828; margin-left: 0.5rem; font-size: 0.7rem;">퇴사</span>' : ''}
+                    </td>
+                    <td style="font-family: monospace; font-size: 0.8125rem;">${instructor.residentId || '-'}</td>
+                    <td><span class="badge badge-business">${businessName}</span></td>
+                    <td>${instructor.position || '-'}</td>
+                    <td>${instructor.defaultGrossPay > 0 ? formatKRW(instructor.defaultGrossPay) : '<span style="color: var(--text-light);">미설정</span>'}</td>
+                    <td>
+                      ${calc ? formatKRW(calc.grossPay) : '<span style="color: var(--danger);">미입력</span>'}
+                      ${isAutoApplied ? '<span class="badge" style="background: #e8f5e9; color: #2e7d32; margin-left: 0.375rem; font-size: 0.7rem;">자동</span>' : ''}
+                    </td>
+                    <td style="color: var(--danger);">${calc ? '-' + formatKRW(calc.totalDeduction) : '-'}</td>
+                    <td><strong style="color: var(--success);">${calc ? formatKRW(calc.netPay) : '-'}</strong></td>
+                    <td style="font-size: 0.8125rem;">${instructor.hireDate || '-'}</td>
+                    <td style="font-size: 0.8125rem; color: ${isTerminated ? 'var(--danger)' : 'inherit'};">${terminationDateDisplay}</td>
+                    <td>
+                      <div class="actions">
+                        <button class="btn btn-primary btn-sm" onclick="openMonthlyInstructorPayrollModal(${instructor.id})">월급입력</button>
+                        <button class="btn btn-outline btn-sm" onclick="openEditMonthlyInstructorModal(${instructor.id})">수정</button>
+                        <button class="btn btn-danger btn-sm" onclick="confirmDeleteMonthlyInstructor(${instructor.id})">삭제</button>
+                      </div>
+                    </td>
+                  </tr>
+                `;
+              }).join('');
+              const totalRow = `
+                <tr style="border-top: 2px solid var(--border); background: var(--bg); font-weight: 700;">
+                  <td colspan="5">합계 (${filteredInstructors.length}명)</td>
+                  <td>${formatKRW(sumGross)}</td>
+                  <td style="color: var(--danger);">-${formatKRW(sumDeduction)}</td>
+                  <td style="color: var(--success);">${formatKRW(sumNet)}</td>
+                  <td colspan="3"></td>
                 </tr>
               `;
-            }).join('') : '<tr><td colspan="9" class="empty-state">등록된 월급제 강사가 없습니다.</td></tr>'}
+              return rows + totalRow;
+            })() : '<tr><td colspan="11" class="empty-state">등록된 월급제 강사가 없습니다.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -1567,7 +1685,8 @@ function saveNewMonthlyInstructor() {
     residentId,
     hireDate,
     terminationDate,
-    position: getMonthlyInstructorPositionValue()
+    position: getMonthlyInstructorPositionValue(),
+    defaultGrossPay: Math.max(0, parseInt(document.getElementById('monthlyInstructorDefaultGrossPay').value, 10) || 0)
   });
 
   closeModal();
@@ -1601,7 +1720,8 @@ function saveEditMonthlyInstructor(id) {
     residentId,
     hireDate,
     terminationDate,
-    position: getMonthlyInstructorPositionValue()
+    position: getMonthlyInstructorPositionValue(),
+    defaultGrossPay: Math.max(0, parseInt(document.getElementById('monthlyInstructorDefaultGrossPay').value, 10) || 0)
   });
 
   closeModal();
@@ -1622,18 +1742,26 @@ function openMonthlyInstructorPayrollModal(id) {
   const instructor = getMonthlyInstructorById(id);
   const payroll = getMonthlyInstructorPayroll(id, selectedMonth);
   const prev = getMonthlyInstructorPayroll(id, getPreviousMonthKey(selectedMonth));
+  const isAutoApplied = payroll?.source === 'default';
 
   document.getElementById('modalTitle').textContent = `${instructor.name} 월별 급여 입력`;
   document.getElementById('modalBody').innerHTML = `
+    ${isAutoApplied ? `
+      <div style="margin-bottom: 1rem; padding: 0.875rem 1rem; background: #e8f5e9; border-radius: 10px; font-size: 0.875rem; color: #2e7d32;">
+        현재 이 달은 기본 월급 <strong>${formatKRW(instructor.defaultGrossPay)}</strong>이 자동 적용 중입니다.<br>
+        저장하면 이 달만 아래 입력값으로 확정됩니다.
+      </div>
+    ` : ''}
     <div class="form-group">
       <label class="form-label">${selectedMonth} 세전 지급액 *</label>
       <input type="number" id="monthlyInstructorGrossPay" class="form-input" value="${payroll?.grossPay || ''}" min="0" step="10000" placeholder="예: 2500000">
       ${prev?.grossPay ? `<small style="color: var(--text-light);">전월 세전 지급액: ${formatKRW(prev.grossPay)}</small>` : ''}
+      ${instructor.defaultGrossPay > 0 ? `<small style="color: var(--text-light); display: block;">기본 월급: ${formatKRW(instructor.defaultGrossPay)} (0으로 저장하면 이 달은 지급 대상에서 제외)</small>` : ''}
     </div>
     <div class="form-group">
       <label class="form-label">추가 공제</label>
       <input type="number" id="monthlyInstructorExtraDeduction" class="form-input" value="${payroll?.extraDeduction || 0}" min="0" step="1000" placeholder="없으면 0">
-      <small style="color: var(--text-light);">사업소득세 3.3% 외에 차감할 금액이 있을 때만 입력합니다.</small>
+      <small style="color: var(--text-light);">사업소득세 ${formatRatePercent(appData.settings.instructorDeduction || 0.033)} 외에 차감할 금액이 있을 때만 입력합니다.</small>
     </div>
     <div class="form-group">
       <label class="form-label">비고</label>
@@ -1663,11 +1791,25 @@ function copyPreviousMonthlyInstructorPayroll(id) {
 }
 
 function saveMonthlyInstructorPayroll(id) {
+  const instructor = getMonthlyInstructorById(id);
   const grossPay = parseInt(document.getElementById('monthlyInstructorGrossPay').value, 10) || 0;
   const extraDeduction = parseInt(document.getElementById('monthlyInstructorExtraDeduction').value, 10) || 0;
-  const memo = document.getElementById('monthlyInstructorMemo').value.trim();
+  let memo = document.getElementById('monthlyInstructorMemo').value.trim();
 
   if (grossPay <= 0) {
+    // 기본 월급이 설정된 강사는 0원 저장으로 해당 월 자동 적용을 취소(지급 제외)할 수 있음
+    if (instructor?.defaultGrossPay > 0) {
+      if (!confirm(`${selectedMonth}을(를) 지급 대상에서 제외하시겠습니까?\n(기본 월급 자동 적용이 이 달에만 해제됩니다)`)) {
+        return;
+      }
+      // 메모가 없으면 제외 사유를 남겨 레코드가 유지되도록 함 (모두 비어 있으면 삭제되어 기본월급이 다시 적용됨)
+      if (!memo && extraDeduction === 0) memo = '지급 제외';
+      setMonthlyInstructorPayroll(id, selectedMonth, { grossPay: 0, extraDeduction, memo });
+      closeModal();
+      renderContent();
+      showToast(`${selectedMonth} 지급이 제외 처리되었습니다.`);
+      return;
+    }
     alert('세전 지급액을 입력해주세요.');
     return;
   }
@@ -3304,6 +3446,69 @@ function renderSettings(container) {
       <button class="btn btn-primary" onclick="saveSettings()">설정 저장</button>
     </div>
 
+    ${(() => {
+      const rates = getActiveInsuranceRates();
+      const toPercent = (rate) => parseFloat((rate * 100).toFixed(4));
+      return `
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">4대보험 요율 설정 (근로자 부담분)</h3>
+      </div>
+      <div style="padding: 0 0 1rem; color: var(--text-light); font-size: 0.875rem;">
+        4대보험 직원의 급여 공제에 적용되는 요율입니다. 매년 요율이 변경되므로 <strong style="color: var(--text);">세무사 안내에 따라</strong> 아래 값을 수정 후 저장하세요.
+        저장 즉시 4대보험 직원의 공제액·실지급액·급여명세서(PDF)에 반영됩니다.
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">국민연금 (%)</label>
+          <input type="number" id="insRateNationalPension" class="form-input" value="${toPercent(rates.nationalPension)}" step="0.001" min="0" max="100">
+          <small style="color: var(--text-light);">기본값 ${formatRatePercent(INSURANCE_RATES.nationalPension)}</small>
+        </div>
+        <div class="form-group">
+          <label class="form-label">건강보험 (%)</label>
+          <input type="number" id="insRateHealthInsurance" class="form-input" value="${toPercent(rates.healthInsurance)}" step="0.001" min="0" max="100">
+          <small style="color: var(--text-light);">기본값 ${formatRatePercent(INSURANCE_RATES.healthInsurance)}</small>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">장기요양 (건강보험료의 %)</label>
+          <input type="number" id="insRateLongTermCare" class="form-input" value="${toPercent(rates.longTermCare)}" step="0.001" min="0" max="100">
+          <small style="color: var(--text-light);">기본값 ${formatRatePercent(INSURANCE_RATES.longTermCare)} · 월급이 아닌 건강보험료 기준 비율</small>
+        </div>
+        <div class="form-group">
+          <label class="form-label">고용보험 (%)</label>
+          <input type="number" id="insRateEmploymentInsurance" class="form-input" value="${toPercent(rates.employmentInsurance)}" step="0.001" min="0" max="100">
+          <small style="color: var(--text-light);">기본값 ${formatRatePercent(INSURANCE_RATES.employmentInsurance)}</small>
+        </div>
+      </div>
+      <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button class="btn btn-primary" onclick="saveInsuranceRates()">4대보험 요율 저장</button>
+        <button class="btn btn-outline" onclick="resetInsuranceRates()">기본값(2026년 기준)으로 복원</button>
+      </div>
+      <div style="margin-top: 1rem; padding: 0.875rem 1rem; background: var(--bg); border-radius: 10px; font-size: 0.8125rem; color: var(--text-light);">
+        예시) 월급 300만원 기준 현재 요율 적용 시:
+        국민연금 ${formatKRW(Math.round(3000000 * rates.nationalPension))} ·
+        건강보험 ${formatKRW(Math.round(3000000 * rates.healthInsurance))} ·
+        장기요양 ${formatKRW(Math.round(Math.round(3000000 * rates.healthInsurance) * rates.longTermCare))} ·
+        고용보험 ${formatKRW(Math.round(3000000 * rates.employmentInsurance))}
+        <br>※ 소득세(간이세액표)와 지방소득세(소득세의 10%)는 별도 자동 계산됩니다.
+      </div>
+    </div>
+      `;
+    })()}
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">관리자 휴대폰 번호</h3>
+      </div>
+      <div class="form-group">
+        <label class="form-label">휴대폰 번호</label>
+        <input type="text" id="adminPhoneInput" class="form-input" value="${appData.users[currentUser.userId]?.phoneNumber || ''}" placeholder="숫자만 입력, 비밀번호 찾기에 사용됩니다">
+      </div>
+      <button class="btn btn-primary" onclick="saveAdminPhone()">휴대폰 번호 저장</button>
+    </div>
+
     <div class="card">
       <div class="card-header">
         <h3 class="card-title">시스템 정보</h3>
@@ -3312,11 +3517,32 @@ function renderSettings(container) {
         <p>등록된 사업장 수: ${appData.businesses.length}개</p>
         <p>등록된 시급제 직원 수: ${appData.staff.length}명</p>
         <p>등록된 비율제 강사 수: ${appData.commissionInstructors.length}명</p>
+        <p>등록된 월급제 3.3% 강사 수: ${appData.monthlyInstructors.length}명 (기본월급 설정 ${appData.monthlyInstructors.filter(i => i.defaultGrossPay > 0).length}명)</p>
+        <p>등록된 4대보험 직원 수: ${appData.insuranceTeachers.length}명</p>
         <p>총 근무기록 수: ${appData.workLogs.length}건</p>
         <p>현재 최저시급: ${formatKRW(MINIMUM_WAGE)}</p>
       </div>
     </div>
   `;
+}
+
+// 관리자 본인 휴대폰 번호 저장 (비밀번호 찾기용)
+function saveAdminPhone() {
+  const input = document.getElementById('adminPhoneInput');
+  if (!input) return;
+
+  // 숫자만 추출
+  const phoneNumber = (input.value || '').replace(/\D/g, '');
+  const userId = currentUser.userId;
+
+  if (!appData.users[userId]) {
+    alert('관리자 계정 정보를 찾을 수 없습니다.');
+    return;
+  }
+
+  appData.users[userId].phoneNumber = phoneNumber;
+  saveData(appData);
+  showToast('휴대폰 번호가 저장되었습니다.');
 }
 
 function openApproveSignupModal(requestId) {
@@ -3486,6 +3712,39 @@ function saveSettings() {
   appData.settings.cardFeeRate = parseFloat(document.getElementById('cardFeeRate').value) / 100;
   saveData(appData);
   showToast('설정이 저장되었습니다.');
+}
+
+// 4대보험 요율 저장 (세무사 안내에 따라 조정)
+function saveInsuranceRates() {
+  const fields = [
+    { id: 'insRateNationalPension', key: 'nationalPension', label: '국민연금' },
+    { id: 'insRateHealthInsurance', key: 'healthInsurance', label: '건강보험' },
+    { id: 'insRateLongTermCare', key: 'longTermCare', label: '장기요양' },
+    { id: 'insRateEmploymentInsurance', key: 'employmentInsurance', label: '고용보험' }
+  ];
+
+  const newRates = {};
+  for (const field of fields) {
+    const percent = parseFloat(document.getElementById(field.id).value);
+    if (!Number.isFinite(percent) || percent < 0 || percent > 100) {
+      alert(`${field.label} 요율을 확인해주세요. (0~100 사이의 % 값)`);
+      return;
+    }
+    newRates[field.key] = percent / 100;
+  }
+
+  appData.settings.insuranceRates = newRates;
+  saveData(appData);
+  renderContent();
+  showToast('4대보험 요율이 저장되었습니다. 모든 화면에 즉시 반영됩니다.');
+}
+
+function resetInsuranceRates() {
+  if (!confirm('4대보험 요율을 기본값(2026년 기준)으로 복원하시겠습니까?')) return;
+  appData.settings.insuranceRates = { ...INSURANCE_RATES };
+  saveData(appData);
+  renderContent();
+  showToast('4대보험 요율이 기본값으로 복원되었습니다.');
 }
 
 // ============ 직원 화면: 내 근무기록 ============
@@ -3860,11 +4119,22 @@ function formatResidentId(value) {
 function renderInsuranceTeachers(container) {
   const allTeachers = getInsuranceTeachersByBusiness(selectedBusiness);
   const { year, month } = parseMonthKey(selectedMonth);
+  const rates = getActiveInsuranceRates();
 
   // 퇴사자 필터링
   const activeTeachers = allTeachers.filter(t => !t.terminationDate);
   const terminatedTeachers = allTeachers.filter(t => !!t.terminationDate);
   const filteredTeachers = showTerminatedInsurance ? allTeachers : activeTeachers;
+
+  // 재직자 기준 월 합계 (요약 카드용)
+  let sumSalary = 0, sumDeduction = 0, sumNet = 0;
+  activeTeachers.forEach(teacher => {
+    const absentDays = getInsuranceAbsenceDays(teacher.id, selectedMonth);
+    const calc = calculateInsurancePayroll(teacher.monthlySalary, absentDays);
+    sumSalary += calc.monthlySalary;
+    sumDeduction += calc.totalDeduction + calc.absenceDeduction;
+    sumNet += calc.finalNetPay;
+  });
 
   container.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
@@ -3881,6 +4151,32 @@ function renderInsuranceTeachers(container) {
         ` : ''}
         <button class="btn btn-primary" onclick="openAddInsuranceTeacherModal()">+ 직원 추가</button>
       </div>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card primary">
+        <div class="summary-label">총 실지급 예정액</div>
+        <div class="summary-value">${formatKRW(sumNet)}</div>
+        <div class="summary-sub">재직자 ${activeTeachers.length}명 기준</div>
+      </div>
+      <div class="summary-card accent">
+        <div class="summary-label">총 월급여 (세전)</div>
+        <div class="summary-value">${formatKRW(sumSalary)}</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label" style="color: var(--text-light);">총 공제액</div>
+        <div class="summary-value" style="color: var(--danger);">${formatKRW(sumDeduction)}</div>
+        <div class="summary-sub" style="color: var(--text-light);">4대보험 + 소득세 + 결근공제</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom: 1.5rem; padding: 0.875rem 1rem; background: var(--bg); border-radius: 10px; font-size: 0.8125rem; color: var(--text-light);">
+      현재 적용 요율 (근로자 부담분):
+      국민연금 <strong style="color: var(--text);">${formatRatePercent(rates.nationalPension)}</strong> ·
+      건강보험 <strong style="color: var(--text);">${formatRatePercent(rates.healthInsurance)}</strong> ·
+      장기요양 <strong style="color: var(--text);">건강보험의 ${formatRatePercent(rates.longTermCare)}</strong> ·
+      고용보험 <strong style="color: var(--text);">${formatRatePercent(rates.employmentInsurance)}</strong>
+      &nbsp;|&nbsp; 요율 변경은 <a href="javascript:void(0)" onclick="switchTab('settings')" style="color: var(--primary); font-weight: 600;">설정 &gt; 4대보험 요율 설정</a>에서 할 수 있습니다.
     </div>
 
     <div class="card">
@@ -3901,17 +4197,25 @@ function renderInsuranceTeachers(container) {
               <th>4대보험 공제</th>
               <th>실지급액</th>
               <th>입사일</th>
+              <th>퇴사일</th>
               <th>관리</th>
             </tr>
           </thead>
           <tbody>
-            ${filteredTeachers.length > 0 ? filteredTeachers.map(teacher => {
+            ${filteredTeachers.length > 0 ? (() => {
+              let tableSalary = 0, tableAbsence = 0, tableDeduction = 0, tableNet = 0;
+              const rows = filteredTeachers.map(teacher => {
               const isTerminated = !!teacher.terminationDate;
               const rowStyle = isTerminated ? 'background: #fafafa; opacity: 0.7;' : '';
               const nameStyle = isTerminated ? 'text-decoration: line-through; color: var(--text-light);' : '';
               const absentDays = getInsuranceAbsenceDays(teacher.id, selectedMonth);
               const calc = calculateInsurancePayroll(teacher.monthlySalary, absentDays);
               const businessName = getBusinessName(teacher.businessId);
+              const terminationDateDisplay = teacher.terminationDate || '-';
+              tableSalary += calc.monthlySalary;
+              tableAbsence += calc.absenceDeduction;
+              tableDeduction += calc.totalDeduction;
+              tableNet += calc.finalNetPay;
 
               return `
                 <tr style="${rowStyle}">
@@ -3938,6 +4242,7 @@ function renderInsuranceTeachers(container) {
                   <td style="color: var(--danger);">-${formatKRW(calc.totalDeduction)}</td>
                   <td><strong style="color: var(--success);">${formatKRW(calc.finalNetPay)}</strong></td>
                   <td style="font-size: 0.8125rem;">${teacher.hireDate || '-'}</td>
+                  <td style="font-size: 0.8125rem; color: ${isTerminated ? 'var(--danger)' : 'inherit'};">${terminationDateDisplay}</td>
                   <td>
                     <div class="actions">
                       <button class="btn btn-primary btn-sm" onclick="showInsuranceDetailModal(${teacher.id})">상세</button>
@@ -3948,7 +4253,20 @@ function renderInsuranceTeachers(container) {
                   </td>
                 </tr>
               `;
-            }).join('') : '<tr><td colspan="11" class="empty-state">등록된 4대보험 직원이 없습니다.</td></tr>'}
+            }).join('');
+              const totalRow = `
+                <tr style="border-top: 2px solid var(--border); background: var(--bg); font-weight: 700;">
+                  <td colspan="4">합계 (${filteredTeachers.length}명)</td>
+                  <td>${formatKRW(tableSalary)}</td>
+                  <td></td>
+                  <td style="color: var(--danger);">-${formatKRW(tableAbsence)}</td>
+                  <td style="color: var(--danger);">-${formatKRW(tableDeduction)}</td>
+                  <td style="color: var(--success);">${formatKRW(tableNet)}</td>
+                  <td colspan="3"></td>
+                </tr>
+              `;
+              return rows + totalRow;
+            })() : '<tr><td colspan="12" class="empty-state">등록된 4대보험 직원이 없습니다.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -4043,15 +4361,21 @@ function getInsuranceTeacherFormHTML(teacher = null) {
       </div>
     </div>
 
+    ${(() => {
+      const rates = getActiveInsuranceRates();
+      return `
     <div style="background: var(--bg); padding: 1rem; border-radius: 8px; margin-top: 1rem;">
-      <strong>4대보험 공제 안내 (근로자 부담분)</strong>
+      <strong>4대보험 공제 안내 (근로자 부담분, 현재 적용 요율)</strong>
       <p style="font-size: 0.875rem; color: var(--text-light); margin-top: 0.5rem;">
-        • 국민연금: 4.75%<br>
-        • 건강보험: 3.595%<br>
-        • 장기요양: 건강보험의 13.14%<br>
-        • 고용보험: 0.9%
+        • 국민연금: ${formatRatePercent(rates.nationalPension)}<br>
+        • 건강보험: ${formatRatePercent(rates.healthInsurance)}<br>
+        • 장기요양: 건강보험의 ${formatRatePercent(rates.longTermCare)}<br>
+        • 고용보험: ${formatRatePercent(rates.employmentInsurance)}<br>
+        요율 변경은 설정 &gt; 4대보험 요율 설정에서 할 수 있습니다.
       </p>
     </div>
+      `;
+    })()}
   `;
 }
 
