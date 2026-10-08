@@ -30,7 +30,8 @@ function parseMonthKey(key) {
 function calculateHours(startTime, endTime, breakMinutes = 0, roundingRule = 'exact') {
   const start = new Date(`2000-01-01 ${startTime}`);
   const end = new Date(`2000-01-01 ${endTime}`);
-  let diffMinutes = (end - start) / 60000 - breakMinutes;
+  // 쉬는시간은 급여에 포함되지 않으므로 차감 (음수 방지)
+  let diffMinutes = Math.max(0, (end - start) / 60000 - breakMinutes);
 
   if (roundingRule === 'hour') {
     // 1시간 단위 반올림 (30분 이상 = 올림)
@@ -353,6 +354,50 @@ function calculateSpecialLecture(lecture, students, settings) {
     breakdown,
     studentCount: students.length
   };
+}
+
+// HTML 특수문자 이스케이프 (직접 입력받은 값을 화면에 그릴 때 사용)
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// ============ 급여 계좌 ============
+const BANK_NAMES = [
+  '국민은행', '신한은행', '우리은행', '하나은행', '농협은행', '기업은행',
+  '카카오뱅크', '토스뱅크', '케이뱅크', '새마을금고', '우체국', '신협', '수협은행',
+  'SC제일은행', '부산은행', 'iM뱅크(대구은행)', '경남은행', '광주은행', '전북은행'
+];
+
+// 계좌 입력값 정리 (계좌번호는 숫자와 하이픈만 남김)
+function normalizeBankAccount(info) {
+  return {
+    bankName: String(info?.bankName || '').trim(),
+    accountNumber: String(info?.accountNumber || '').replace(/[^\d-]/g, ''),
+    accountHolder: String(info?.accountHolder || '').trim()
+  };
+}
+
+// 계좌 입력 검증: 문제가 있으면 안내 문구, 없으면 null (계좌는 선택 입력)
+function validateBankAccount(account) {
+  if (!account.bankName && !account.accountNumber) return null;
+  if (!account.bankName || !account.accountNumber) {
+    return '은행과 계좌번호를 함께 입력해주세요.';
+  }
+  if (account.accountNumber.replace(/-/g, '').length < 8) {
+    return '계좌번호를 다시 확인해주세요.';
+  }
+  return null;
+}
+
+// "국민은행 123-45-6789" 형태 (복사/표시용). 계좌가 없으면 빈 문자열
+function formatBankAccount(person) {
+  if (!person?.bankName || !person?.accountNumber) return '';
+  return `${person.bankName} ${person.accountNumber}`;
 }
 
 // Toast 메시지 표시

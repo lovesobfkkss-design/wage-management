@@ -124,6 +124,9 @@ function ensureDataCompatibility(data) {
     if (s.terminationDate === undefined) s.terminationDate = null;
     if (s.position === undefined) s.position = null;
     if (s.residentId === undefined) s.residentId = null;
+    if (s.bankName === undefined) s.bankName = '';
+    if (s.accountNumber === undefined) s.accountNumber = '';
+    if (s.accountHolder === undefined) s.accountHolder = '';
   });
   // 기존 비율제 강사에 businessId 없으면 기본값 할당
   data.commissionInstructors.forEach(i => {
@@ -647,6 +650,13 @@ function normalizeLoginIdValue(value) {
   return String(value || '').trim().replace(/\s+/g, '');
 }
 
+// 주민등록번호를 000000-0000000 형식으로 정규화합니다.
+function normalizeResidentIdValue(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 13);
+  if (digits.length <= 6) return digits;
+  return `${digits.slice(0, 6)}-${digits.slice(6)}`;
+}
+
 function getPendingStaffRequests() {
   return Array.isArray(appData?.pendingStaffRequests) ? appData.pendingStaffRequests : [];
 }
@@ -655,12 +665,15 @@ function getPendingStaffRequestById(requestId) {
   return getPendingStaffRequests().find(request => request.id === requestId) || null;
 }
 
-function getExistingLoginIds() {
+// dataset 미지정 시 현재 로그인된 학원(appData)을 기준으로 조회합니다.
+function getExistingLoginIds(dataset) {
+  const source = dataset || appData;
   const ids = new Set();
-  Object.values(normalizeUserMap(appData?.users)).forEach((user) => {
+  Object.values(normalizeUserMap(source?.users)).forEach((user) => {
     if (user.loginId) ids.add(String(user.loginId).toLowerCase());
   });
-  getPendingStaffRequests().forEach((request) => {
+  const requests = Array.isArray(source?.pendingStaffRequests) ? source.pendingStaffRequests : [];
+  requests.forEach((request) => {
     if (request.status === 'pending' && request.loginId) {
       ids.add(String(request.loginId).toLowerCase());
     }
@@ -668,11 +681,11 @@ function getExistingLoginIds() {
   return ids;
 }
 
-function buildUniqueRequestedLoginId(name, requestedLoginId) {
+function buildUniqueRequestedLoginId(name, requestedLoginId, dataset) {
   const base = normalizeLoginIdValue(requestedLoginId || name);
   const fallback = normalizeLoginIdValue(name) || 'staff';
   const desired = base || fallback;
-  const existing = getExistingLoginIds();
+  const existing = getExistingLoginIds(dataset);
 
   if (!existing.has(desired.toLowerCase())) {
     return desired;
@@ -777,12 +790,31 @@ async function createStaffSignupRequest(signupInfo) {
   const name = String(signupInfo.name || '').trim();
   const requestedLoginId = normalizeLoginIdValue(signupInfo.loginId || '');
   const password = String(signupInfo.password || '');
+  const phoneNumber = String(signupInfo.phoneNumber || '').replace(/[^\d]/g, '');
+  const residentId = normalizeResidentIdValue(signupInfo.residentId || '');
 
   if (!academyCode || !name || !password) {
     return { success: false, message: '학원코드, 이름, 비밀번호를 입력해주세요.' };
   }
   if (password.length < 4) {
     return { success: false, message: '비밀번호는 4자리 이상이어야 합니다.' };
+  }
+  if (!phoneNumber) {
+    return { success: false, message: '휴대폰 번호를 입력해주세요.' };
+  }
+  if (phoneNumber.length < 10 || phoneNumber.length > 11) {
+    return { success: false, message: '휴대폰 번호는 숫자 10~11자리로 입력해주세요.' };
+  }
+  if (!residentId) {
+    return { success: false, message: '주민등록번호를 입력해주세요.' };
+  }
+  if (!/^\d{6}-\d{7}$/.test(residentId)) {
+    return { success: false, message: '주민등록번호는 000000-0000000 형식으로 입력해주세요.' };
+  }
+  const bankAccount = normalizeBankAccount(signupInfo);
+  const bankAccountError = validateBankAccount(bankAccount);
+  if (bankAccountError) {
+    return { success: false, message: bankAccountError };
   }
 
   const academyCodeSnapshot = await database.ref(`academiesByCode/${academyCode}`).once('value');
@@ -799,7 +831,7 @@ async function createStaffSignupRequest(signupInfo) {
 
   const compat = ensureAcademyDataCompatibility(academySnapshot.val(), academyId, academyCode);
   const academyData = compat.data;
-  const loginId = buildUniqueRequestedLoginId(name, requestedLoginId);
+  const loginId = buildUniqueRequestedLoginId(name, requestedLoginId, academyData);
   const hasApprovedUser = Object.values(academyData.users || {}).some((user) => String(user.loginId || '').toLowerCase() === loginId.toLowerCase());
   if (hasApprovedUser) {
     return { success: false, message: '이미 사용 중인 로그인 ID입니다.' };
@@ -813,6 +845,11 @@ async function createStaffSignupRequest(signupInfo) {
     requestedLoginId: requestedLoginId || name,
     loginId,
     password,
+    phoneNumber,
+    residentId,
+    bankName: bankAccount.bankName,
+    accountNumber: bankAccount.accountNumber,
+    accountHolder: bankAccount.accountHolder || (bankAccount.accountNumber ? name : ''),
     academyId,
     academyCode,
     status: 'pending',
@@ -853,7 +890,12 @@ function approvePendingStaffRequest(requestId, staffInfo) {
     roundingRule: staffInfo.roundingRule,
     hireDate: staffInfo.hireDate || null,
     terminationDate: null,
-    position: staffInfo.position || null
+    position: staffInfo.position || null,
+    phoneNumber: staffInfo.phoneNumber !== undefined ? staffInfo.phoneNumber : (request.phoneNumber || ''),
+    residentId: staffInfo.residentId !== undefined ? (staffInfo.residentId || null) : (request.residentId || null),
+    bankName: staffInfo.bankName !== undefined ? staffInfo.bankName : (request.bankName || ''),
+    accountNumber: staffInfo.accountNumber !== undefined ? staffInfo.accountNumber : (request.accountNumber || ''),
+    accountHolder: staffInfo.accountHolder !== undefined ? staffInfo.accountHolder : (request.accountHolder || '')
   });
 
   const user = getUserByStaffId(newStaff.id);
@@ -1556,84 +1598,55 @@ function exportWorkLogsToExcel(monthKey) {
   downloadCSV(csv, `근무기록_${year}년${month}월.csv`);
 }
 
-// 급여정산 Excel(CSV) 내보내기 (시급제 + 비율제 + 월급제 3.3% 통합)
+// 급여정산 Excel(CSV) 내보내기
+// 화면(급여정산 탭)과 동일한 통합 데이터를 사용합니다.
+// 4대보험 · 월급제 3.3% · 시급제 · 비율제 · 특강 전체 포함
 function exportPayrollToExcel(monthKey, businessId = 'all') {
   const { year, month } = parseMonthKey(monthKey);
 
-  const headers = ['이름', '유형', '기준금액', '정산내역', '세전급여', '공제내역', '공제액', '실지급액', '비고'];
-  const data = [];
+  const includeTerminated = typeof showTerminatedPayroll !== 'undefined' ? showTerminatedPayroll : false;
+  const typeFilter = typeof payrollTypeFilter !== 'undefined' ? payrollTypeFilter : 'all';
+  const sortKey = typeof payrollSort !== 'undefined' ? payrollSort : 'type';
 
-  // 시급제 직원
-  const staffList = businessId === 'all' ? appData.staff : appData.staff.filter(s => s.businessId === businessId);
-  staffList.forEach(staff => {
-    const logs = getStaffWorkLogs(staff.id, monthKey);
-    const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
-    if (totalHours === 0) return;
+  const allRows = buildPayrollRows(monthKey, businessId, { includeTerminated });
+  const rows = sortPayrollRows(
+    typeFilter === 'all' ? allRows : allRows.filter(r => r.type === typeFilter),
+    sortKey
+  );
 
-    const wage = calculateWage(staff, totalHours);
-    const ded = calculateDeduction(staff, wage.grossPay, appData.settings);
-    const typeName = staff.type === 'assistant' ? '조교' : '파트강사';
+  const headers = ['이름', '유형', '소속', '주민번호', '기준 내역', '산출 내역', '세전급여', '공제내역', '공제액', '실지급액', '비고'];
 
-    data.push([
-      staff.name,
-      typeName,
-      totalHours.toFixed(2) + '시간',
-      wage.breakdown,
-      Math.round(wage.grossPay),
-      ded.typeName,
-      Math.round(ded.deduction),
-      Math.round(ded.netPay),
-      ''
-    ]);
-  });
+  const data = rows.map(row => [
+    row.terminated ? `${row.name} (퇴사)` : row.name,
+    row.typeLabel,
+    row.businessName,
+    row.residentId,
+    row.basisText,
+    row.detailText,
+    Math.round(row.gross),
+    row.deductionNote,
+    Math.round(row.deduction),
+    Math.round(row.net),
+    row.memo || ''
+  ]);
 
-  // 비율제 강사
-  const commissionList = businessId === 'all'
-    ? appData.commissionInstructors
-    : appData.commissionInstructors.filter(i => i.businessId === businessId);
-  commissionList.forEach(instructor => {
-    const students = getCommissionStudents(instructor.id, monthKey);
-    if (students.length === 0) return;
+  // 합계 행
+  const total = sumPayrollRows(rows);
+  data.push([
+    `합계 (${total.count}건)`, '', '', '', '', '',
+    Math.round(total.gross),
+    '',
+    Math.round(total.deduction),
+    Math.round(total.net),
+    ''
+  ]);
 
-    const calc = calculateCommission(instructor, students, appData.settings);
-
-    data.push([
-      instructor.name,
-      `비율제(${instructor.commissionRate * 100}%)`,
-      formatKRW(calc.totalTuition),
-      calc.breakdown,
-      Math.round(calc.instructorGross),
-      `카드1%+3.3%`,
-      Math.round(calc.totalDeduction),
-      Math.round(calc.netPay),
-      ''
-    ]);
-  });
-
-  const monthlyInstructorList = businessId === 'all'
-    ? appData.monthlyInstructors
-    : appData.monthlyInstructors.filter(i => i.businessId === businessId);
-  monthlyInstructorList.forEach(instructor => {
-    const payroll = getMonthlyInstructorPayroll(instructor.id, monthKey);
-    if (!payroll || payroll.grossPay <= 0) return;
-
-    const calc = calculateMonthlyInstructorPayroll(payroll.grossPay, appData.settings, payroll.extraDeduction);
-    const deductionLabel = calc.extraDeduction > 0 ? '사업소득세 3.3% + 추가공제' : '사업소득세 3.3%';
-    data.push([
-      instructor.name,
-      '월급제 3.3%',
-      Math.round(calc.grossPay),
-      payroll.source === 'default' ? '기본월급 자동 적용' : '월별 지급총액 입력',
-      Math.round(calc.grossPay),
-      deductionLabel,
-      Math.round(calc.totalDeduction),
-      Math.round(calc.netPay),
-      payroll.memo || ''
-    ]);
-  });
+  const typeLabel = typeFilter === 'all'
+    ? ''
+    : '_' + ((typeof PAYROLL_TYPES !== 'undefined' && PAYROLL_TYPES.find(t => t.key === typeFilter)?.label) || typeFilter);
 
   const csv = arrayToCSV(data, headers);
-  downloadCSV(csv, `급여정산_${year}년${month}월.csv`);
+  downloadCSV(csv, `급여정산_${year}년${month}월${typeLabel}.csv`);
 }
 
 // 전체 데이터 초기화

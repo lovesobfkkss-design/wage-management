@@ -18,6 +18,9 @@ function createStaffPayslipHTML(staff, monthKey, logs, wage, ded) {
   const { year, month } = parseMonthKey(monthKey);
   const businessName = getBusinessName(staff.businessId);
   const totalHours = logs.reduce((sum, log) => sum + log.hours, 0);
+  // 쉬는시간은 급여에 포함되지 않으므로 근거로 함께 표기
+  const totalBreakMinutes = logs.reduce((sum, log) => sum + (log.breakMinutes || 0), 0);
+  const workDays = new Set(logs.map(log => log.date)).size;
   const typeName = staff.type === 'assistant' ? '조교' : '파트강사';
   const deductionRate = staff.type === 'assistant' ? '0.9%' : '3.3%';
   const today = new Date();
@@ -53,7 +56,12 @@ function createStaffPayslipHTML(staff, monthKey, logs, wage, ded) {
 
       <div style="margin-bottom: 20px;">
         <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[근무 내역]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">근무일수: ${workDays} 일</p>
         <p style="margin: 4px 0; font-size: 13px;">총 근무시간: ${totalHours.toFixed(2)} 시간</p>
+        ${totalBreakMinutes > 0 ? `
+          <p style="margin: 4px 0; font-size: 13px; color: #666;">총 휴게시간: ${totalBreakMinutes} 분 (${(totalBreakMinutes / 60).toFixed(2)} 시간)</p>
+          <p style="margin: 4px 0; font-size: 12px; color: #888;">※ 쉬는시간은 급여에 포함되지 않으며, 위 총 근무시간에서 이미 제외되었습니다.</p>
+        ` : ''}
         <p style="margin: 4px 0; font-size: 13px;">시급: ${formatKRW(staff.hourlyRate)} 원</p>
         ${staff.tier1Hours > 0 ? `
           <p style="margin: 4px 0; font-size: 13px; padding-left: 10px;">- 1구간 (${staff.tier1Hours}시간): ${formatKRW(staff.tier1Rate)} 원/시간</p>
@@ -539,6 +547,144 @@ function createSpecialLecturePayslipHTML(lecture, monthKey, students, calc) {
       </div>
     </div>
   `;
+}
+
+/**
+ * 월급제 3.3% 강사 급여명세서 HTML 생성
+ */
+function createMonthlyInstructorPayslipHTML(instructor, monthKey, payroll, calc) {
+  const { year, month } = parseMonthKey(monthKey);
+  const businessName = getBusinessName(instructor.businessId);
+  const today = new Date();
+  const todayStr = formatDateKorean(today);
+  const taxRateLabel = `${(((appData.settings?.instructorDeduction) || 0.033) * 100).toFixed(1)}%`;
+
+  return `
+    <div id="pdfContent" style="
+      width: 595px;
+      padding: 40px;
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: white;
+      color: #1a1a1a;
+      line-height: 1.6;
+    ">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="font-size: 24px; margin: 0 0 8px 0;">${businessName}</h1>
+        <h2 style="font-size: 18px; font-weight: 500; margin: 0; color: #666;">급여 명세서</h2>
+      </div>
+
+      <div style="font-size: 13px; margin-bottom: 20px;">
+        <p style="margin: 4px 0;">발급일: ${todayStr}</p>
+        <p style="margin: 4px 0;">정산월: ${year}년 ${month}월</p>
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[강사 정보]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">이름: ${instructor.name}</p>
+        <p style="margin: 4px 0; font-size: 13px;">직급: ${instructor.position || '월급제 강사'}</p>
+        <p style="margin: 4px 0; font-size: 13px;">주민등록번호: ${instructor.residentId || '-'}</p>
+        <p style="margin: 4px 0; font-size: 13px;">입사일: ${instructor.hireDate || '-'}</p>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[급여 내역]</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9; font-weight: bold;">세전 지급액</td>
+            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${formatKRW(calc.grossPay)}</td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[공제 내역]</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead>
+            <tr style="background: #f5f5f5;">
+              <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">항목</th>
+              <th style="padding: 8px; text-align: center; border: 1px solid #ddd;">비율</th>
+              <th style="padding: 8px; text-align: right; border: 1px solid #ddd;">금액</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding: 8px; border: 1px solid #ddd;">사업소득세</td>
+              <td style="padding: 8px; border: 1px solid #ddd; text-align: center; color: #666;">${taxRateLabel}</td>
+              <td style="padding: 8px; border: 1px solid #ddd; text-align: right; color: #c00;">-${formatKRW(calc.incomeTax)}</td>
+            </tr>
+            ${calc.extraDeduction > 0 ? `
+            <tr>
+              <td style="padding: 8px; border: 1px solid #ddd;">추가 공제</td>
+              <td style="padding: 8px; border: 1px solid #ddd; text-align: center; color: #666;">직접입력</td>
+              <td style="padding: 8px; border: 1px solid #ddd; text-align: right; color: #c00;">-${formatKRW(calc.extraDeduction)}</td>
+            </tr>
+            ` : ''}
+            <tr style="background: #f9f9f9; font-weight: bold;">
+              <td colspan="2" style="padding: 8px; border: 1px solid #ddd;">공제액 계</td>
+              <td style="padding: 8px; border: 1px solid #ddd; text-align: right; color: #c00;">-${formatKRW(calc.totalDeduction)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      ${payroll.memo ? `
+      <div style="margin-bottom: 20px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[비고]</h3>
+        <p style="margin: 4px 0; font-size: 13px;">${payroll.memo}</p>
+      </div>
+      ` : ''}
+
+      <hr style="border: none; border-top: 1px solid #333; margin: 20px 0;">
+
+      <div style="margin-bottom: 30px;">
+        <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #333;">[정산 요약]</h3>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
+          <span>세전 지급액:</span>
+          <span>${formatKRW(calc.grossPay)}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 13px; margin: 4px 0;">
+          <span>공제액 계:</span>
+          <span>- ${formatKRW(calc.totalDeduction)}</span>
+        </div>
+        <hr style="border: none; border-top: 1px solid #ccc; margin: 10px 0; width: 200px; margin-left: auto;">
+        <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: bold; margin: 4px 0;">
+          <span>실지급액:</span>
+          <span>${formatKRW(calc.netPay)}</span>
+        </div>
+      </div>
+
+      <div style="text-align: center; font-size: 12px; color: #666; margin-top: 40px;">
+        귀하의 노고에 감사드립니다.
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * 월급제 3.3% 강사 급여명세서 PDF 생성
+ */
+function generateMonthlyInstructorPDF(instructorId, monthKey) {
+  const instructor = getMonthlyInstructorById(instructorId);
+  if (!instructor) {
+    showToast('강사 정보를 찾을 수 없습니다.');
+    return;
+  }
+
+  const payroll = getMonthlyInstructorPayroll(instructorId, monthKey);
+  if (!payroll || !(payroll.grossPay > 0)) {
+    showToast('해당 월의 급여 입력이 없습니다.');
+    return;
+  }
+
+  const calc = calculateMonthlyInstructorPayroll(payroll.grossPay, appData.settings, payroll.extraDeduction);
+  const { year, month } = parseMonthKey(monthKey);
+
+  const html = createMonthlyInstructorPayslipHTML(instructor, monthKey, payroll, calc);
+  const fileName = `급여명세서_${instructor.name}_${year}년${month}월.pdf`;
+
+  htmlToPDF(html, fileName);
 }
 
 /**
