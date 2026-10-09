@@ -359,8 +359,14 @@ function createInsurancePayslipHTML(teacher, monthKey, calc) {
         <table style="width: 100%; border-collapse: collapse;">
           <tr>
             <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9; font-weight: bold;">기본급</td>
-            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${formatKRW(calc.monthlySalary)}</td>
+            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${formatKRW(calc.taxableSalary)}</td>
           </tr>
+          ${calc.nonTaxableAmount > 0 ? `
+          <tr>
+            <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9; font-weight: bold;">식대 (비과세)</td>
+            <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${formatKRW(calc.nonTaxableAmount)}</td>
+          </tr>
+          ` : ''}
           <tr>
             <td style="padding: 8px; border: 1px solid #ddd; background: #f9f9f9; font-weight: bold;">결근 공제</td>
             <td style="padding: 8px; border: 1px solid #ddd; text-align: right; color: #c00;">-${formatKRW(calc.absenceDeduction)} (${calc.absentDays}일)</td>
@@ -435,7 +441,7 @@ function generateInsurancePDF(teacherId, monthKey) {
   }
 
   const absentDays = getInsuranceAbsenceDays(teacherId, monthKey);
-  const calc = calculateInsurancePayroll(teacher.monthlySalary, absentDays);
+  const calc = calculateInsurancePayroll(teacher, absentDays);
   const { year, month } = parseMonthKey(monthKey);
 
   const html = createInsurancePayslipHTML(teacher, monthKey, calc);

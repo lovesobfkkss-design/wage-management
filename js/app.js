@@ -587,6 +587,239 @@ function compareAmountCell(amount) {
   return amount > 0 ? formatKRW(amount) : '<span style="color: var(--border);">–</span>';
 }
 
+// ============ 월별 변동 분석 ============
+
+// 증감 표기: "▲ 120,000원" / "▼ 50,000원" / "변동 없음"
+function formatSignedKRW(diff) {
+  if (diff === 0) return '변동 없음';
+  return `${diff > 0 ? '▲' : '▼'} ${formatKRW(Math.abs(diff))}`;
+}
+
+// 증감률 표기 (기준 금액이 없으면 빈 문자열)
+function formatChangeRate(current, base) {
+  if (!(base > 0)) return '';
+  const rate = (current - base) / base * 100;
+  return `${rate > 0 ? '+' : ''}${rate.toFixed(1)}%`;
+}
+
+// 만원 단위 축약 (차트 라벨용)
+function formatManwon(amount) {
+  return `${Math.round(amount / 10000).toLocaleString('ko-KR')}만`;
+}
+
+// 기준월까지 같은 방향으로 몇 달 연속 변했는지 ("3개월 연속 ▲")
+function getPayStreakLabel(amounts) {
+  let streak = 0;
+  let direction = 0;
+  for (let i = amounts.length - 1; i > 0; i--) {
+    const diff = amounts[i] - amounts[i - 1];
+    const sign = Math.sign(diff);
+    if (sign === 0 || amounts[i - 1] === 0) break;
+    if (direction === 0) direction = sign;
+    if (sign !== direction) break;
+    streak++;
+  }
+  return streak >= 2 ? `${streak}개월 연속 ${direction > 0 ? '▲' : '▼'}` : '';
+}
+
+// 사람별 최근 N개월 미니 막대 (추이)
+function paySparklineHTML(amounts, monthKeys) {
+  const max = Math.max(...amounts, 1);
+  const barWidth = 6, gap = 2, height = 24;
+  const width = amounts.length * (barWidth + gap) - gap;
+  const tip = monthKeys.map((mk, i) => `${parseMonthKey(mk).month}월 ${formatKRW(amounts[i])}`).join(' / ');
+  return `
+    <svg class="pay-sparkline" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${tip}">
+      <title>${tip}</title>
+      ${amounts.map((amount, i) => {
+        const h = amount > 0 ? Math.max(2, Math.round(amount / max * height)) : 1;
+        return `<rect x="${i * (barWidth + gap)}" y="${height - h}" width="${barWidth}" height="${h}" rx="1" class="${amount > 0 ? '' : 'empty'}"></rect>`;
+      }).join('')}
+    </svg>`;
+}
+
+/**
+ * 기준월과 전월을 비교한 변동 분석 카드
+ * - 요약 타일 / 한눈에 보는 문장 / 월별 합계 막대 / 직원별 증감 표
+ */
+function renderPayChangeAnalysisHTML(monthKeys, monthTotals, typeTotals, people) {
+  const curKey = monthKeys[monthKeys.length - 1];
+  const prevKey = monthKeys[monthKeys.length - 2];
+  const curMonth = parseMonthKey(curKey).month;
+  const prevMonth = parseMonthKey(prevKey).month;
+
+  const curTotal = monthTotals[curKey].net;
+  const prevTotal = monthTotals[prevKey].net;
+  const totalDiff = curTotal - prevTotal;
+
+  // 기준월을 제외한 이전 달들의 평균 (급여가 있었던 달만)
+  const pastNets = monthKeys.slice(0, -1).map(mk => monthTotals[mk].net).filter(v => v > 0);
+  const pastAverage = pastNets.length > 0 ? Math.round(pastNets.reduce((s, v) => s + v, 0) / pastNets.length) : 0;
+
+  // 직원별 증감
+  const changes = people.map(p => {
+    const amounts = monthKeys.map(mk => p.byMonth[mk] || 0);
+    const cur = amounts[amounts.length - 1];
+    const prev = amounts[amounts.length - 2];
+    const paid = amounts.filter(v => v > 0);
+    return {
+      person: p,
+      amounts,
+      cur,
+      prev,
+      diff: cur - prev,
+      average: paid.length > 0 ? Math.round(paid.reduce((s, v) => s + v, 0) / paid.length) : 0,
+      isNew: cur > 0 && prev === 0,
+      isGone: cur === 0 && prev > 0,
+      streak: getPayStreakLabel(amounts)
+    };
+  }).filter(c => c.cur > 0 || c.prev > 0)
+    .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff) || a.person.name.localeCompare(b.person.name, 'ko'));
+
+  const newcomers = changes.filter(c => c.isNew);
+  const gone = changes.filter(c => c.isGone);
+  const continuing = changes.filter(c => !c.isNew && !c.isGone);
+  const topUp = continuing.filter(c => c.diff > 0)[0];
+  const topDown = continuing.filter(c => c.diff < 0)[0];
+  const unchangedCount = continuing.filter(c => c.diff === 0).length;
+  const maxAbsDiff = Math.max(...changes.map(c => Math.abs(c.diff)), 1);
+
+  // 유형별 증감 (변동이 있는 유형만, 큰 순)
+  const typeChanges = PAYROLL_TYPES.map(t => ({
+    label: t.label,
+    badge: t.badge,
+    diff: typeTotals[t.key][curKey].net - typeTotals[t.key][prevKey].net
+  })).filter(t => t.diff !== 0).sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+
+  const names = list => list.map(c => escapeHtml(c.person.name)).join(', ');
+  const rateText = (cur, base) => {
+    const rate = formatChangeRate(cur, base);
+    return rate ? ` (${rate})` : '';
+  };
+
+  // 한눈에 보는 요약 문장
+  const insights = [];
+  if (prevTotal === 0 && curTotal === 0) {
+    insights.push(`${prevMonth}월과 ${curMonth}월 모두 급여 데이터가 없습니다.`);
+  } else {
+    insights.push(totalDiff === 0
+      ? `${curMonth}월 실지급 합계는 <strong>${formatKRW(curTotal)}</strong>으로 ${prevMonth}월과 같습니다.`
+      : `${curMonth}월 실지급 합계는 <strong>${formatKRW(curTotal)}</strong>으로 ${prevMonth}월보다 <strong>${formatKRW(Math.abs(totalDiff))}${rateText(curTotal, prevTotal)} ${totalDiff > 0 ? '늘었습니다' : '줄었습니다'}</strong>.`);
+    if (typeChanges.length > 0) {
+      insights.push(`유형별로는 ${typeChanges.map(t => `<span class="badge ${t.badge}">${t.label}</span> ${formatSignedKRW(t.diff)}`).join(' · ')}`);
+    }
+    if (topUp) insights.push(`가장 많이 늘어난 사람: <strong>${escapeHtml(topUp.person.name)}</strong> ${formatSignedKRW(topUp.diff)}${rateText(topUp.cur, topUp.prev)}`);
+    if (topDown) insights.push(`가장 많이 줄어든 사람: <strong>${escapeHtml(topDown.person.name)}</strong> ${formatSignedKRW(topDown.diff)}${rateText(topDown.cur, topDown.prev)}`);
+    if (newcomers.length > 0) insights.push(`${curMonth}월에 새로 지급: ${names(newcomers)} (합계 ${formatKRW(newcomers.reduce((s, c) => s + c.cur, 0))})`);
+    if (gone.length > 0) insights.push(`${prevMonth}월엔 지급했지만 ${curMonth}월엔 없음: ${names(gone)} (합계 ${formatKRW(gone.reduce((s, c) => s + c.prev, 0))})`);
+    if (unchangedCount > 0) insights.push(`${unchangedCount}명은 전월과 금액이 같습니다.`);
+  }
+
+  // 월별 합계 막대: 숫자 라벨은 기준월·최고·최저만 (나머지는 마우스를 올리면 표시)
+  const nets = monthKeys.map(mk => monthTotals[mk].net);
+  const maxNet = Math.max(...nets, 1);
+  const positiveNets = nets.filter(v => v > 0);
+  const minNet = positiveNets.length > 0 ? Math.min(...positiveNets) : 0;
+  const labeled = new Set([nets.length - 1, nets.indexOf(maxNet), nets.indexOf(minNet)]);
+
+  return `
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">${curMonth}월 변동 분석 (${prevMonth}월 대비)</h3>
+      </div>
+
+      <div class="type-summary-grid">
+        <div class="type-summary-item">
+          <div class="tsi-count">${prevMonth}월 대비</div>
+          <div class="analysis-figure">${formatSignedKRW(totalDiff)}</div>
+          <div class="tsi-sub">${formatKRW(prevTotal)} → ${formatKRW(curTotal)}${rateText(curTotal, prevTotal)}</div>
+        </div>
+        <div class="type-summary-item">
+          <div class="tsi-count">이전 ${pastNets.length}개월 평균 대비</div>
+          <div class="analysis-figure">${pastAverage > 0 ? formatSignedKRW(curTotal - pastAverage) : '-'}</div>
+          <div class="tsi-sub">${pastAverage > 0 ? `평균 ${formatKRW(pastAverage)}${rateText(curTotal, pastAverage)}` : '비교할 이전 달이 없습니다'}</div>
+        </div>
+        <div class="type-summary-item">
+          <div class="tsi-count">지급 인원 변동</div>
+          <div class="analysis-figure">신규 ${newcomers.length}명 · 빠짐 ${gone.length}명</div>
+          <div class="tsi-sub">늘어남 ${continuing.filter(c => c.diff > 0).length}명 · 줄어듦 ${continuing.filter(c => c.diff < 0).length}명 · 동일 ${unchangedCount}명</div>
+        </div>
+      </div>
+
+      <ul class="analysis-insights">
+        ${insights.map(text => `<li>${text}</li>`).join('')}
+      </ul>
+
+      <div class="analysis-subtitle">월별 실지급 합계</div>
+      <div class="trend-chart">
+        ${monthKeys.map((mk, i) => {
+          const { year, month } = parseMonthKey(mk);
+          return `
+            <div class="trend-col ${i === nets.length - 1 ? 'current' : ''}" data-tip="${year}년 ${month}월 · ${formatKRW(nets[i])}" tabindex="0">
+              <div class="trend-bar-area">
+                <div class="trend-value">${labeled.has(i) && nets[i] > 0 ? formatManwon(nets[i]) : ''}</div>
+                <div class="trend-bar" style="height: ${nets[i] > 0 ? Math.max(1, nets[i] / maxNet * 100) : 0}%;"></div>
+              </div>
+              <div class="trend-label">${month}월</div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+
+      <div class="analysis-subtitle">
+        직원별 증감 (변동 큰 순)
+        <span class="analysis-legend"><span class="legend-swatch up"></span>늘어남 <span class="legend-swatch down"></span>줄어듦</span>
+      </div>
+      <div class="table-container">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th class="sticky-col">이름</th>
+              <th>유형</th>
+              <th class="num">${prevMonth}월</th>
+              <th class="num">${curMonth}월</th>
+              <th>증감</th>
+              <th class="num">증감률</th>
+              <th class="num">기간 평균</th>
+              <th>최근 ${monthKeys.length}개월 추이</th>
+              <th>비고</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${changes.length > 0 ? changes.map(c => {
+              const barWidth = Math.round(Math.abs(c.diff) / maxAbsDiff * 50);
+              const notes = [];
+              if (c.isNew) notes.push('신규 지급');
+              if (c.isGone) notes.push('이번 달 지급 없음');
+              if (c.streak) notes.push(c.streak);
+              return `
+                <tr>
+                  <td class="sticky-col"><strong>${escapeHtml(c.person.name)}</strong></td>
+                  <td><span class="badge ${c.person.badgeClass}">${c.person.typeLabel}</span></td>
+                  <td class="num">${compareAmountCell(c.prev)}</td>
+                  <td class="num">${compareAmountCell(c.cur)}</td>
+                  <td>
+                    <div class="change-cell">
+                      <div class="change-track">
+                        ${c.diff !== 0 ? `<div class="change-bar ${c.diff > 0 ? 'up' : 'down'}" style="width: ${Math.max(2, barWidth)}%;"></div>` : ''}
+                      </div>
+                      <span>${formatSignedKRW(c.diff)}</span>
+                    </div>
+                  </td>
+                  <td class="num">${formatChangeRate(c.cur, c.prev) || '–'}</td>
+                  <td class="num">${compareAmountCell(c.average)}</td>
+                  <td>${paySparklineHTML(c.amounts, monthKeys)}</td>
+                  <td class="cell-small">${notes.join(' · ')}</td>
+                </tr>
+              `;
+            }).join('') : `<tr><td colspan="9" class="empty-state">${prevMonth}월과 ${curMonth}월의 급여 데이터가 없습니다.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
 function renderMonthlyComparisonHTML() {
   const monthKeys = getMonthKeysUntil(selectedMonth, compareMonthCount);
   const { typeTotals, monthTotals, people } = buildMonthlyComparison(monthKeys, selectedBusiness);
@@ -612,6 +845,8 @@ function renderMonthlyComparisonHTML() {
       ${activeMonths > 0 && activeMonths < colCount ? ` <span>(급여 발생 ${activeMonths}개월 기준)</span>` : ''}
       &nbsp;|&nbsp; 위 월 선택기를 바꾸면 비교 기준월이 함께 이동합니다.
     </div>
+
+    ${renderPayChangeAnalysisHTML(monthKeys, monthTotals, typeTotals, people)}
 
     <div class="card">
       <div class="card-header">
@@ -2869,7 +3104,7 @@ function buildPayrollRows(monthKey, businessId = 'all', options = {}) {
     if (teacher.hireDate && monthKey < teacher.hireDate.slice(0, 7)) return;
 
     const absentDays = getInsuranceAbsenceDays(teacher.id, monthKey);
-    const calc = calculateInsurancePayroll(teacher.monthlySalary, absentDays);
+    const calc = calculateInsurancePayroll(teacher, absentDays);
 
     rows.push({
       type: 'insurance',
@@ -4830,7 +5065,7 @@ function renderInsuranceTeachers(container) {
   let sumSalary = 0, sumDeduction = 0, sumNet = 0;
   activeTeachers.forEach(teacher => {
     const absentDays = getInsuranceAbsenceDays(teacher.id, selectedMonth);
-    const calc = calculateInsurancePayroll(teacher.monthlySalary, absentDays);
+    const calc = calculateInsurancePayroll(teacher, absentDays);
     sumSalary += calc.monthlySalary;
     sumDeduction += calc.totalDeduction + calc.absenceDeduction;
     sumNet += calc.finalNetPay;
@@ -4902,7 +5137,7 @@ function renderInsuranceTeachers(container) {
               const rows = filteredTeachers.map((teacher, index) => {
               const isTerminated = !!teacher.terminationDate;
               const absentDays = getInsuranceAbsenceDays(teacher.id, selectedMonth);
-              const calc = calculateInsurancePayroll(teacher.monthlySalary, absentDays);
+              const calc = calculateInsurancePayroll(teacher, absentDays);
               const businessName = getBusinessName(teacher.businessId);
               const terminationDateDisplay = teacher.terminationDate || '-';
               tableSalary += calc.monthlySalary;
@@ -5023,10 +5258,35 @@ function getInsuranceTeacherFormHTML(teacher = null) {
         <input type="text" id="insTeacherPositionCustom" class="form-input" value="${isCustomPosition ? teacher.position : ''}" placeholder="직급 입력">
       </div>
     </div>
-    <div class="form-group">
-      <label class="form-label">월 급여 (세전) *</label>
-      <input type="number" id="insTeacherSalary" class="form-input" value="${teacher?.monthlySalary || 3000000}" min="0" step="10000">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">월 급여 (세전 총액, 식대 포함) *</label>
+        <input type="number" id="insTeacherSalary" class="form-input" value="${teacher?.monthlySalary || 3000000}" min="0" step="10000">
+      </div>
+      <div class="form-group">
+        <label class="form-label">이 중 비과세 (식대 등)</label>
+        <input type="number" id="insTeacherNonTaxable" class="form-input" value="${teacher?.nonTaxableAmount || 0}" min="0" step="10000" placeholder="예: 200000">
+        <small style="color: var(--text-light); font-size: 0.75rem;">고용보험·소득세는 비과세를 뺀 금액으로 계산합니다</small>
+      </div>
     </div>
+    <div class="form-section-title">공제 기준 (세무사 명세서와 맞출 때)</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">국민연금 기준소득월액</label>
+        <input type="number" id="insTeacherPensionBase" class="form-input" value="${teacher?.pensionBase || ''}" min="0" step="1000" placeholder="비워두면 과세급여">
+      </div>
+      <div class="form-group">
+        <label class="form-label">건강보험 보수월액</label>
+        <input type="number" id="insTeacherHealthBase" class="form-input" value="${teacher?.healthBase || ''}" min="0" step="1000" placeholder="비워두면 과세급여">
+      </div>
+      <div class="form-group">
+        <label class="form-label">공제대상가족 수 (본인 포함)</label>
+        <input type="number" id="insTeacherDependents" class="form-input" value="${teacher?.dependents || 1}" min="1" max="11" step="1">
+      </div>
+    </div>
+    <small style="color: var(--text-light); font-size: 0.75rem; display: block; margin-bottom: 1rem;">
+      국민연금·건강보험은 공단에 신고된 금액 기준으로 고지되어 사람마다 다를 수 있습니다. 명세서 금액과 다르면 이 칸에 신고 금액을 넣어주세요.
+    </small>
     <div class="form-group">
       <label class="form-label">주민등록번호</label>
       <input
@@ -5073,6 +5333,17 @@ function toggleInsuranceCustomPosition(select) {
   customGroup.style.display = select.value === 'custom' ? 'block' : 'none';
 }
 
+// 공제 기준 입력값 (비과세·기준소득월액·보수월액·가족 수)
+function readInsuranceDeductionBasisFields() {
+  const num = id => Math.max(0, parseInt(document.getElementById(id).value, 10) || 0);
+  return {
+    nonTaxableAmount: num('insTeacherNonTaxable'),
+    pensionBase: num('insTeacherPensionBase') || null,
+    healthBase: num('insTeacherHealthBase') || null,
+    dependents: Math.max(1, num('insTeacherDependents'))
+  };
+}
+
 function getInsurancePositionValue() {
   const select = document.getElementById('insTeacherPosition');
   if (select.value === 'custom') {
@@ -5106,6 +5377,7 @@ function saveNewInsuranceTeacher() {
     name,
     businessId: parseInt(document.getElementById('insTeacherBusinessId').value),
     monthlySalary: parseInt(document.getElementById('insTeacherSalary').value) || 0,
+    ...readInsuranceDeductionBasisFields(),
     residentId,
     hireDate,
     terminationDate,
@@ -5153,6 +5425,7 @@ function saveEditInsuranceTeacher(id) {
     name,
     businessId: parseInt(document.getElementById('insTeacherBusinessId').value),
     monthlySalary: parseInt(document.getElementById('insTeacherSalary').value) || 0,
+    ...readInsuranceDeductionBasisFields(),
     residentId,
     hireDate,
     terminationDate,
@@ -5167,7 +5440,7 @@ function saveEditInsuranceTeacher(id) {
 function showInsuranceDetailModal(id) {
   const teacher = getInsuranceTeacherById(id);
   const absentDays = getInsuranceAbsenceDays(id, selectedMonth);
-  const calc = calculateInsurancePayroll(teacher.monthlySalary, absentDays);
+  const calc = calculateInsurancePayroll(teacher, absentDays);
 
   document.getElementById('modalTitle').textContent = `${teacher.name} 4대보험 상세`;
   document.getElementById('modalBody').innerHTML = `
@@ -5191,6 +5464,7 @@ function showInsuranceDetailModal(id) {
       <strong>${selectedMonth} 결근 정보</strong>
       <div style="margin-top: 0.5rem; color: var(--text-light);">결근 ${calc.absentDays}일, 1일 공제액 ${formatKRW(calc.dailyDeduction)}</div>
       <div style="margin-top: 0.25rem; color: var(--text-light);">주민등록번호: ${teacher.residentId || '-'}</div>
+      <div style="margin-top: 0.25rem; color: var(--text-light);">과세급여 ${formatKRW(calc.taxableSalary)} (비과세 ${formatKRW(calc.nonTaxableAmount)} 제외)</div>
     </div>
 
     <h4 style="margin-bottom: 0.75rem; color: var(--primary);">4대보험 공제 내역</h4>

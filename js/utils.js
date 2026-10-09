@@ -138,58 +138,132 @@ function formatRatePercent(rate) {
   return parseFloat((rate * 100).toFixed(4)) + '%';
 }
 
-/**
- * 근로소득 간이세액표 (2026년 기준, 부양가족 1인 본인)
- * 실제 세액표 기반
- */
-function getIncomeTax(monthlySalary) {
-  // 2026년 간이세액표 (부양가족 1인 기준) - 실제 값
-  const taxTable = [
-    { min: 0, max: 1060000, tax: 0 },
-    { min: 1060000, max: 1500000, tax: 15000 },
-    { min: 1500000, max: 2000000, tax: 26000 },
-    { min: 2000000, max: 2500000, tax: 35600 },
-    { min: 2500000, max: 3000000, tax: 58990 },
-    { min: 3000000, max: 3500000, tax: 85540 },
-    { min: 3500000, max: 4000000, tax: 122170 },
-    { min: 4000000, max: 5000000, tax: 176040 },
-    { min: 5000000, max: 6000000, tax: 257040 },
-    { min: 6000000, max: 7000000, tax: 340370 },
-    { min: 7000000, max: Infinity, tax: 450000 }
-  ];
-
-  // 해당 구간의 세액 반환
-  for (let i = taxTable.length - 1; i >= 0; i--) {
-    if (monthlySalary > taxTable[i].min) {
-      return taxTable[i].tax;
-    }
-  }
-  return 0;
+// 10원 미만 절사 (4대보험료·원천징수세액 고지 방식). 부동소수점 오차로 1원 모자라게 잘리지 않도록 보정
+function floorToTen(value) {
+  return Math.floor((value + 1e-6) / 10) * 10;
 }
 
 /**
- * 4대보험 + 소득세 공제액 계산
+ * 근로소득 간이세액 (소득세법 시행령 별표2의 계산 방식)
+ * 조견표를 통째로 넣는 대신 표를 만드는 공식을 그대로 계산합니다.
+ * @param {number} taxableSalary - 월 과세급여 (비과세 식대 등 제외)
+ * @param {number} dependents - 공제대상가족 수 (본인 포함, 기본 1명)
  */
-function calculateInsuranceDeduction(monthlySalary) {
+function getIncomeTax(taxableSalary, dependents = 1) {
+  const salary = Math.max(0, Number(taxableSalary) || 0);
+  const family = Math.max(1, parseInt(dependents, 10) || 1);
+  const TABLE_MAX = 10000000;
+
+  // 1,000만원 초과분은 1,000만원 세액에 초과분 계산을 더함
+  if (salary > TABLE_MAX) {
+    const baseTax = getIncomeTax(TABLE_MAX, family);
+    if (salary <= 14000000) {
+      return floorToTen(baseTax + (salary - TABLE_MAX) * 0.98 * 0.35 + 25000);
+    }
+    return floorToTen(baseTax + 1397000 + (salary - 14000000) * 0.98 * 0.38);
+  }
+
+  // 조견표 구간의 중간값을 월급여로 봄 (150만 미만 5천원, 300만 미만 1만원, 그 이상 2만원 단위)
+  let monthly = salary;
+  if (salary < TABLE_MAX) {
+    const step = salary < 1500000 ? 5000 : (salary < 3000000 ? 10000 : 20000);
+    monthly = Math.floor(salary / step) * step + step / 2;
+  }
+  const annual = monthly * 12;
+
+  // 근로소득공제
+  let earnedDeduction;
+  if (annual <= 5000000) earnedDeduction = annual * 0.7;
+  else if (annual <= 15000000) earnedDeduction = 3500000 + (annual - 5000000) * 0.4;
+  else if (annual <= 45000000) earnedDeduction = 7500000 + (annual - 15000000) * 0.15;
+  else if (annual <= 100000000) earnedDeduction = 12000000 + (annual - 45000000) * 0.05;
+  else earnedDeduction = 14750000 + (annual - 100000000) * 0.02;
+
+  // 인적공제 + 연금보험료공제 (간이세액표는 4.5% 기준으로 작성됨)
+  const personalDeduction = 1500000 * family;
+  const pensionDeduction = monthly * 0.045 * 12;
+
+  // 특별소득공제 등
+  let specialDeduction;
+  if (family >= 3) {
+    if (annual <= 30000000) specialDeduction = 5000000 + annual * 0.07;
+    else if (annual <= 45000000) specialDeduction = 5000000 + annual * 0.07 - (annual - 30000000) * 0.05;
+    else if (annual <= 70000000) specialDeduction = 5000000 + annual * 0.05;
+    else specialDeduction = 5000000 + annual * 0.03;
+    if (annual > 40000000) specialDeduction += (annual - 40000000) * 0.04;
+  } else {
+    const fixed = family === 2 ? 3600000 : 3100000;
+    if (annual <= 30000000) specialDeduction = fixed + annual * 0.04;
+    else if (annual <= 45000000) specialDeduction = fixed + annual * 0.04 - (annual - 30000000) * 0.05;
+    else if (annual <= 70000000) specialDeduction = fixed + annual * 0.015;
+    else specialDeduction = fixed + annual * 0.005;
+  }
+
+  const taxBase = Math.max(0, annual - earnedDeduction - personalDeduction - pensionDeduction - specialDeduction);
+
+  // 기본세율
+  const brackets = [
+    [14000000, 0.06, 0],
+    [50000000, 0.15, 840000],
+    [88000000, 0.24, 6240000],
+    [150000000, 0.35, 15360000],
+    [300000000, 0.38, 37060000],
+    [500000000, 0.40, 94060000],
+    [1000000000, 0.42, 174060000],
+    [Infinity, 0.45, 384060000]
+  ];
+  let computedTax = 0;
+  let lower = 0;
+  for (const [upper, rate, accumulated] of brackets) {
+    if (taxBase <= upper) {
+      computedTax = accumulated + (taxBase - lower) * rate;
+      break;
+    }
+    lower = upper;
+  }
+
+  // 근로소득세액공제 (간이세액표 기준: 산출세액 50만원 이하 55%, 초과분 30%) 및 한도
+  let credit = computedTax <= 500000 ? computedTax * 0.55 : 275000 + (computedTax - 500000) * 0.3;
+  let creditLimit;
+  if (annual <= 33000000) creditLimit = 740000;
+  else if (annual <= 70000000) creditLimit = Math.max(660000, 740000 - (annual - 33000000) * 0.008);
+  else if (annual <= 120000000) creditLimit = Math.max(500000, 660000 - (annual - 70000000) * 0.5);
+  else creditLimit = Math.max(200000, 500000 - (annual - 120000000) * 0.5);
+  credit = Math.min(credit, creditLimit);
+
+  const monthlyTax = floorToTen(Math.max(0, computedTax - credit) / 12);
+  return monthlyTax < 1000 ? 0 : monthlyTax;  // 1,000원 미만은 징수하지 않음
+}
+
+/**
+ * 4대보험 + 소득세 공제액 계산 (세무사 급여명세서와 같은 방식)
+ * - 고용보험·소득세: 과세급여(월 급여 − 비과세 식대 등) 기준
+ * - 국민연금: 공단에 신고된 기준소득월액 기준 (미입력 시 과세급여, 천원 미만 절사)
+ * - 건강보험: 공단에 신고된 보수월액 기준 (미입력 시 과세급여)
+ * - 각 항목은 10원 미만 절사
+ * @param {Object|number} teacherOrSalary - 4대보험 직원 객체 또는 월 급여(숫자)
+ */
+function calculateInsuranceDeduction(teacherOrSalary) {
+  const teacher = (teacherOrSalary && typeof teacherOrSalary === 'object')
+    ? teacherOrSalary
+    : { monthlySalary: teacherOrSalary };
   const rates = getActiveInsuranceRates();
 
-  // 국민연금
-  const nationalPension = Math.round(monthlySalary * rates.nationalPension);
+  const monthlySalary = Math.max(0, Number(teacher.monthlySalary) || 0);
+  const nonTaxableAmount = Math.min(monthlySalary, Math.max(0, Number(teacher.nonTaxableAmount) || 0));
+  const taxableSalary = monthlySalary - nonTaxableAmount;
+  const pensionBase = teacher.pensionBase > 0 ? Number(teacher.pensionBase) : Math.floor(taxableSalary / 1000) * 1000;
+  const healthBase = teacher.healthBase > 0 ? Number(teacher.healthBase) : taxableSalary;
+  const dependents = Math.max(1, parseInt(teacher.dependents, 10) || 1);
 
-  // 건강보험
-  const healthInsurance = Math.round(monthlySalary * rates.healthInsurance);
-
+  const nationalPension = floorToTen(pensionBase * rates.nationalPension);
+  const healthInsurance = floorToTen(healthBase * rates.healthInsurance);
   // 장기요양보험 (건강보험료의 일정 비율)
-  const longTermCare = Math.round(healthInsurance * rates.longTermCare);
-
-  // 고용보험
-  const employmentInsurance = Math.round(monthlySalary * rates.employmentInsurance);
-
-  // 소득세 (간이세액표 기준)
-  const incomeTax = getIncomeTax(monthlySalary);
-
-  // 지방소득세 (소득세의 10%)
-  const localIncomeTax = Math.round(incomeTax * 0.1);
+  const longTermCare = floorToTen(healthInsurance * rates.longTermCare);
+  const employmentInsurance = floorToTen(taxableSalary * rates.employmentInsurance);
+  // 소득세 (간이세액) / 지방소득세 (소득세의 10%)
+  const incomeTax = getIncomeTax(taxableSalary, dependents);
+  const localIncomeTax = floorToTen(incomeTax * 0.1);
 
   // 총 공제액
   const totalDeduction = nationalPension + healthInsurance + longTermCare + employmentInsurance + incomeTax + localIncomeTax;
@@ -199,6 +273,11 @@ function calculateInsuranceDeduction(monthlySalary) {
 
   return {
     monthlySalary,
+    nonTaxableAmount,
+    taxableSalary,
+    pensionBase,
+    healthBase,
+    dependents,
     nationalPension,
     healthInsurance,
     longTermCare,
@@ -209,18 +288,19 @@ function calculateInsuranceDeduction(monthlySalary) {
     netPay,
     rates,
     breakdown: [
-      { name: '국민연금', amount: nationalPension, rate: formatRatePercent(rates.nationalPension) },
-      { name: '건강보험', amount: healthInsurance, rate: formatRatePercent(rates.healthInsurance) },
+      { name: '국민연금', amount: nationalPension, rate: `${formatKRW(pensionBase)} × ${formatRatePercent(rates.nationalPension)}` },
+      { name: '건강보험', amount: healthInsurance, rate: `${formatKRW(healthBase)} × ${formatRatePercent(rates.healthInsurance)}` },
       { name: '장기요양', amount: longTermCare, rate: '건강보험의 ' + formatRatePercent(rates.longTermCare) },
-      { name: '고용보험', amount: employmentInsurance, rate: formatRatePercent(rates.employmentInsurance) },
-      { name: '소득세', amount: incomeTax, rate: '간이세액' },
+      { name: '고용보험', amount: employmentInsurance, rate: `${formatKRW(taxableSalary)} × ${formatRatePercent(rates.employmentInsurance)}` },
+      { name: '소득세', amount: incomeTax, rate: `간이세액 (가족 ${dependents}명)` },
       { name: '지방소득세', amount: localIncomeTax, rate: '소득세의 10%' }
     ]
   };
 }
 
-function calculateInsurancePayroll(monthlySalary, absentDays = 0) {
-  const insurance = calculateInsuranceDeduction(monthlySalary);
+function calculateInsurancePayroll(teacherOrSalary, absentDays = 0) {
+  const insurance = calculateInsuranceDeduction(teacherOrSalary);
+  const monthlySalary = insurance.monthlySalary;
   const normalizedAbsentDays = Math.max(0, parseInt(absentDays, 10) || 0);
   const dailyDeduction = Math.round(monthlySalary / 28);
   const absenceDeduction = dailyDeduction * normalizedAbsentDays;

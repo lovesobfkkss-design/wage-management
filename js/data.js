@@ -161,6 +161,11 @@ function ensureDataCompatibility(data) {
     if (t.terminationDate === undefined) t.terminationDate = null;
     if (t.position === undefined) t.position = null;
     if (t.residentId === undefined) t.residentId = null;
+    // 공제 계산 기준 (미입력이면 과세급여 기준 자동 계산)
+    if (t.nonTaxableAmount === undefined) t.nonTaxableAmount = 0;
+    if (t.pensionBase === undefined) t.pensionBase = null;
+    if (t.healthBase === undefined) t.healthBase = null;
+    if (t.dependents === undefined) t.dependents = 1;
   });
 
   // 특강 데이터 호환성 처리
@@ -1393,6 +1398,10 @@ function addInsuranceTeacher(info) {
     type: 'insuranceTeacher',
     businessId: info.businessId,
     monthlySalary: info.monthlySalary,
+    nonTaxableAmount: info.nonTaxableAmount || 0,
+    pensionBase: info.pensionBase || null,
+    healthBase: info.healthBase || null,
+    dependents: info.dependents || 1,
     residentId: info.residentId || null,
     hireDate: info.hireDate || null,
     terminationDate: info.terminationDate || null,
